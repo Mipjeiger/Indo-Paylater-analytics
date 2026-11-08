@@ -1,4 +1,5 @@
-engineering/.env
+paylater_engineering/.env
 **DS_Store
 researchment/catboost_info
-engineering/minio.license
+paylater_engineering/minio.license
+paylater_engineering/.env.example
