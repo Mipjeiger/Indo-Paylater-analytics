@@ -3,3 +3,4 @@ paylater_engineering/.env
 researchment/catboost_info
 paylater_engineering/minio.license
 paylater_engineering/.env.example
+**__pycache__/
