@@ -4,3 +4,5 @@ researchment/catboost_info
 paylater_engineering/minio.license
 paylater_engineering/.env.example
 **__pycache__/
+.pytest_cache
+paylater_engineering/app/frontend/node_modules
