@@ -402,7 +402,7 @@ docker run --rm \
   --env POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
   --env REDIS_URL=redis://redis:6379/0 \
   paylater-feast:0.41.0 \
-  sh -c 'cd /app/app/feast && feast apply'
+  sh -c 'cd app/feast && feast apply'
 ```
 
 Start Feast on port `6566` and attach it to the same Compose network so it can
@@ -444,7 +444,7 @@ docker run --rm \
   --env POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
   --env REDIS_URL=redis://redis:6379/0 \
   paylater-feast:0.41.0 \
-  sh -c 'cd /app/app/feast && feast apply'
+  sh -c 'cd app/feast && feast apply'
 ```
 
 Do not expose Feast directly to the browser. The API and model-serving
