@@ -7,9 +7,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 
 COPY docker/requirements.txt .
 COPY app ./app
+COPY database ./database
 
 RUN pip install --no-cache-dir -r requirements.txt
 
- ENV PYTHONPATH=/workspace
+ENV PYTHONPATH=/workspace
 
 CMD ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

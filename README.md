@@ -370,7 +370,87 @@ The ETL requires PostgreSQL connectivity and the configured dataset path. Check
 the ETL output and database row counts before training. Do not rerun an ETL
 against a shared environment without confirming its append/upsert behavior.
 
-### 5. 🔬 Start MLflow and Prefect
+### 5. 🧩 Build and start Feast
+
+Feast is built from
+[`docker/feast.Dockerfile`](paylater_engineering/docker/feast.Dockerfile).
+The image installs Feast `0.41.0`, copies the project into `/app`, and uses
+the PostgreSQL-backed source and Redis online store defined in
+`app/feast/feature_store.yaml`.
+
+The Feast image is currently standalone and is not a service in
+`docker-compose.yml`. Build it from the `paylater_engineering` directory so
+the Dockerfile's `COPY . /app` includes the full project:
+
+```bash
+docker build \
+  --file docker/feast.Dockerfile \
+  --tag paylater-feast:0.41.0 \
+  .
+```
+
+Apply entity, source, and feature-view definitions before starting the service.
+The command below creates or updates the local Feast registry:
+
+```bash
+docker run --rm \
+  --network paylater_indodana \
+  --env POSTGRES_HOST=postgres \
+  --env POSTGRES_PORT=5432 \
+  --env POSTGRES_DB="$POSTGRES_DB" \
+  --env POSTGRES_USER="$POSTGRES_USER" \
+  --env POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+  --env REDIS_URL=redis://redis:6379/0 \
+  paylater-feast:0.41.0 \
+  sh -c 'cd /app/app/feast && feast apply'
+```
+
+Start Feast on port `6566` and attach it to the same Compose network so it can
+resolve the `postgres` and `redis` service names:
+
+```bash
+docker run --rm \
+  --name paylater-feast \
+  --network paylater_indodana \
+  --publish 6566:6566 \
+  --env POSTGRES_HOST=postgres \
+  --env POSTGRES_PORT=5432 \
+  --env POSTGRES_DB="$POSTGRES_DB" \
+  --env POSTGRES_USER="$POSTGRES_USER" \
+  --env POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+  --env REDIS_URL=redis://redis:6379/0 \
+  paylater-feast:0.41.0
+```
+
+In another terminal, verify the Feast process:
+
+```bash
+docker logs --follow paylater-feast
+```
+
+The default `provider: local` registry is stored at
+`app/feast/data/registry.db` inside the container. For local development,
+persist it by mounting a host directory and rerun `feast apply`:
+
+```bash
+mkdir -p .feast-data
+docker run --rm \
+  --network paylater_indodana \
+  --volume "$PWD/.feast-data:/app/app/feast/data" \
+  --env POSTGRES_HOST=postgres \
+  --env POSTGRES_PORT=5432 \
+  --env POSTGRES_DB="$POSTGRES_DB" \
+  --env POSTGRES_USER="$POSTGRES_USER" \
+  --env POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+  --env REDIS_URL=redis://redis:6379/0 \
+  paylater-feast:0.41.0 \
+  sh -c 'cd /app/app/feast && feast apply'
+```
+
+Do not expose Feast directly to the browser. The API and model-serving
+components remain the controlled boundary for feature retrieval.
+
+### 6. 🔬 Start MLflow and Prefect
 
 ```bash
 docker compose up -d mlflow prefect
@@ -388,7 +468,7 @@ MLflow stores tracking metadata in PostgreSQL and artifacts in the MinIO
 orchestration server; the training flows still need to be submitted or
 executed with a configured Prefect API URL.
 
-### 6. 🧠 Execute model training
+### 7. 🧠 Execute model training
 
 The training flows are:
 
@@ -437,7 +517,7 @@ model versions, so uploading a raw object to MinIO alone is not sufficient;
 the artifact must also be registered through the model-serving/registry
 workflow.
 
-### 7. ⚡ Build and start the FastAPI service
+### 8. ⚡ Build and start the FastAPI service
 
 Rebuild when changing Python dependencies, Docker configuration, or copied
 application files:
@@ -468,7 +548,7 @@ GET  /score/dti-distress/{borrower_id}
 POST /classify/root-cause/{borrower_id}
 ```
 
-### 8. 🩺 Run API smoke tests
+### 9. 🩺 Run API smoke tests
 
 Health and metrics:
 
@@ -497,7 +577,7 @@ If model registration or artifacts are incomplete, a model endpoint should
 return an explicit service/model error. Do not replace the error with a
 fabricated prediction.
 
-### 9. 📊 Start monitoring
+### 10. 📊 Start monitoring
 
 ```bash
 docker compose up -d prometheus grafana
@@ -513,7 +593,7 @@ Prometheus scrapes FastAPI through the Compose network at
 `http://fastapi:8000/metrics/`. Check the Prometheus targets page and confirm
 the `paylater-api` target is up before relying on dashboard values.
 
-### 10. 🖥️ Start the frontend
+### 11. 🖥️ Start the frontend
 
 Configure the frontend API base URL through the local frontend environment:
 
@@ -531,7 +611,7 @@ and root-cause routes. Pages whose aggregation APIs are not registered display
 an explicit unavailable state instead of fabricated borrower, portfolio,
 model, or audit data.
 
-### 11. 🛑 Stop services
+### 12. 🛑 Stop services
 
 Stop containers while preserving named volumes:
 

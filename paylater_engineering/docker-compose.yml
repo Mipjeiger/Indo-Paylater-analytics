@@ -35,20 +35,19 @@ services:
       retries: 5
 
   redis-ui:
-    image: rediscommander/redis-commander:latest
+    image: redis/redisinsight:latest
     container_name: redis-ui
-    environment:
-      - REDIS_HOSTS=local:redis:6379
     ports:
       - "8081:8081"
     depends_on:
-      redis:
-        condition: service_healthy
+      - redis
+    environment:
+      - REDIS_HOSTS=local:redis:6379
     networks:
       - paylater_indodana
 
   minio:
-    image: minio/minio:RELEASE.2023-09-21T23-10-00Z
+    image: cgr.dev/chainguard/minio:latest
     container_name: minio
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
@@ -119,8 +118,8 @@ services:
       - 8.8.8.8
       - 1.1.1.1
     depends_on:
-      postgres:
-        condition: service_healthy
+      - postgres
+      - redis
     networks:
       - paylater_indodana
     healthcheck:
@@ -128,6 +127,32 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  feast:
+    build:
+      context: .
+      dockerfile: docker/feast.Dockerfile
+    container_name: feast
+    environment:
+      POSTGRES_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "6566:6566"
+    volumes:
+      - .:/workspace
+      - ./.feast-data:/workspace/app/feast/data   # Persists the Feast registry locally
+    working_dir: /workspace
+    command: ["feast", "-c", "app/feast", "serve", "--host", "0.0.0.0", "--port", "6566"]
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - paylater_indodana
 
   mlflow:
     image: ghcr.io/mlflow/mlflow:v3.17.0-full
@@ -138,7 +163,7 @@ services:
       --default-artifact-root s3://paylater-models/mlflow/
       --serve-artifacts
     ports:
-      - "5000:5000"
+      - "5002:5000"
     env_file:
       - .env
     environment:
@@ -151,10 +176,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
+      - postgres
+      - minio
     networks:
       - paylater_indodana
     healthcheck:
@@ -194,8 +217,7 @@ services:
     networks:
       - paylater_indodana
     depends_on:
-      fastapi:
-        condition: service_healthy
+      - fastapi
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9090/-/ready"]
       interval: 10s
@@ -214,8 +236,7 @@ services:
     networks:
       - paylater_indodana
     depends_on:
-      prometheus:
-        condition: service_healthy
+      - prometheus
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 10s
