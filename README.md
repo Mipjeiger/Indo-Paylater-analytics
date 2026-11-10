@@ -675,9 +675,9 @@ PYTHONPATH=. pytest -q database/tests app/registry/tests
 
 ## 🔁 CI/CD automation
 
-GitHub Actions provides automated quality gates and build validation. The
-workflows do not connect to PostgreSQL, Redis, MinIO, MLflow, Prefect, or
-external APIs, and they do not publish images or require repository
+GitHub Actions provides automated quality gates, security checks, integration
+checks, and build validation. CI uses disposable service containers and
+workflow-scoped test values; it does not access production systems or
 credentials.
 
 ### Continuous integration
@@ -687,27 +687,42 @@ Workflow: `.github/workflows/ci.yml`
 CI runs on pull requests and on pushes to `main` or `master` when
 `paylater_engineering/` or workflow files change.
 
-The CI pipeline has three jobs:
+The CI pipeline has seven jobs:
 
-1. **Python quality**
+1. **Secret scanning**
+   - Runs Gitleaks against the repository history.
+   - Fails when committed credential-like material is detected.
+   - Does not contain application credentials.
+2. **Static security analysis**
+   - Runs Bandit against Python application code.
+   - Runs `pip-audit` against `docker/requirements.txt`.
+3. **Python quality**
    - Uses Python 3.11.
    - Compiles `app/` and `database/`.
    - Installs the test runner.
    - Runs the repository test suite with `PYTHONPATH=.`.
    - PostgreSQL integration tests remain skipped unless a test DSN is
      explicitly provided; CI does not contain database credentials.
-2. **Frontend quality**
+4. **Frontend quality**
    - Uses Node.js 20.
    - Runs `npm ci` from `app/frontend/`.
    - Runs the TypeScript/Vite production build.
-3. **Compose validation**
+5. **Compose validation**
    - Runs `docker compose config --quiet`.
    - Creates a temporary empty `.env` only because Compose declares that file
      through `env_file`; no credentials or secret values are stored in the
      workflow.
    - Validates Compose structure and variable interpolation without starting
      containers.
-   - Does not start containers or connect to any service.
+6. **Service integration**
+   - Starts ephemeral PostgreSQL 16, Redis 7, and MinIO services.
+   - Verifies a PostgreSQL query, Redis ping, and MinIO bucket operation.
+   - Destroys the service containers when the job ends.
+7. **Model training validation**
+   - Reads the real Parquet dataset.
+   - Verifies required targets and `borrower_id`.
+   - Parses each training flow and verifies a training entry point exists.
+   - Does not train production models in pull-request CI.
 
 To reproduce the CI checks locally:
 
@@ -724,23 +739,119 @@ cd ../..
 docker compose config --quiet
 ```
 
-### Continuous delivery
+Security and integration jobs use disposable CI-only values and services.
+They do not access production databases, object storage, model registries, or
+external API credentials.
+
+### Pre-deployment delivery validation
+
+Workflow: `.github/workflows/cd-pre.yml`
+
+`cd-pre.yml` is the pre-deployment delivery workflow. It validates that the
+current revision can produce deployable artifacts before the full deployment
+workflow is used. It runs on pushes to `main` or `master`, version tags
+matching `v*.*.*`, and manual dispatch:
+
+1. Builds the FastAPI image locally in the GitHub Actions runner.
+2. Starts the image and performs an API smoke test against `/docs`.
+3. Installs frontend dependencies with `npm ci`.
+4. Builds the frontend bundle with Vite.
+5. Uploads the frontend `dist/` directory as a short-lived artifact.
+6. Creates a commit-SHA release manifest describing the API image, frontend
+   artifact, and rollback reference.
+
+This workflow does not publish to GHCR, connect to staging or production, or
+restart a production service. It is intended for pre-deployment verification
+and artifact inspection.
+
+### Full continuous delivery and deployment
 
 Workflow: `.github/workflows/cd.yml`
 
-CD runs on pushes to `main` or `master`, version tags matching `v*.*.*`, and
-manual dispatch. It creates build outputs but does not deploy them:
+`cd.yml` is the full deployment workflow. It publishes and deploys an
+immutable release:
 
 1. Builds the FastAPI image from `docker/api.Dockerfile`.
-2. Installs frontend dependencies with `npm ci`.
-3. Builds the frontend bundle with Vite.
-4. Uploads the frontend `dist/` directory as a short-lived GitHub Actions
-   artifact.
+2. Publishes commit-SHA and ref tags to GitHub Container Registry.
+3. Builds the frontend bundle and packages it as a commit-SHA archive.
+4. Deploys the API image and frontend release to the protected `staging`
+   Docker host over SSH.
+5. Runs the staging `/health/` smoke test.
+6. Deploys to the protected `production` environment when the workflow is
+   manually dispatched for deployment or a version tag is pushed.
+7. Applies required production environment reviewers before the production
+   deployment proceeds.
+8. Runs the production `/health/` smoke test.
 
-This is intentionally a build-only delivery stage. Publishing an image to a
-container registry, deploying to infrastructure, or promoting a model requires
-an explicit deployment environment, protected secrets, approvals, and a
-separate production workflow.
+The normal release sequence is:
+
+```text
+ci.yml -> cd-pre.yml -> cd.yml staging -> staging smoke test
+       -> production approval -> cd.yml production -> production smoke test
+```
+
+`cd-pre.yml` and `cd.yml` may both be triggered by the same branch or tag
+event. The pre-deployment workflow is a validation gate; the full workflow is
+the workflow that publishes and deploys the release.
+
+### Rollback strategy
+
+Each delivery build is tied to an immutable commit SHA:
+
+```text
+paylater-fastapi:<commit-sha>
+paylater-frontend-<commit-sha>
+```
+
+The release manifest is retained for 30 days. A deployment implementation
+should retain the currently deployed SHA and roll back by redeploying the last
+approved SHA with its matching frontend artifact. This avoids mutable
+`latest` tags as rollback references.
+
+The deployment workflow uses:
+
+- **Container registry:** GitHub Container Registry (`ghcr.io`).
+- **Deployment platform:** a Docker host or VM reachable through SSH.
+- **Staging environment:** GitHub Environment named `staging`.
+- **Production environment:** GitHub Environment named `production`.
+- **Protected credentials:** GitHub Environment Secrets, never repository
+  files.
+- **Approval gate:** required reviewers configured on the `production`
+  environment.
+
+Configure these GitHub Environment values before enabling deployment:
+
+| Environment | Variables | Secrets |
+|---|---|---|
+| `staging` | `APP_URL`, `APP_DIR` | `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PORT`, `DEPLOY_SSH_KEY` |
+| `production` | `APP_URL`, `APP_DIR` | `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PORT`, `DEPLOY_SSH_KEY` |
+
+`GITHUB_TOKEN` is supplied by GitHub Actions for GHCR authentication. It is
+not written to the repository or release artifacts. Configure the production
+environment with at least one required reviewer so a successful staging
+smoke test does not automatically deploy to production.
+
+The remote Docker host must already have Docker, a protected application
+directory, and the production runtime `.env`. The workflow uploads only the
+frontend release archive and pulls the immutable API image. It does not copy
+runtime credentials to the host.
+
+### Executing a rollback
+
+1. Open **Actions → CD → Run workflow**.
+2. Select `rollback` for `operation`.
+3. Enter the full 40-character SHA of the previously approved release in
+   `rollback_sha`.
+4. Approve the `production` environment review.
+5. The rollback job pulls the matching immutable GHCR image.
+6. It restarts the API with the existing protected host `.env`.
+7. It switches `current-frontend` to the retained frontend release directory.
+8. It runs the production health smoke test.
+
+The target release must still exist in the host's
+`$APP_DIR/releases/<commit-sha>/dist` directory and the matching image must be
+available in GHCR. Keep release directories and registry retention policies
+long enough to support the required rollback window.
 
 ### Reading workflow results
 
