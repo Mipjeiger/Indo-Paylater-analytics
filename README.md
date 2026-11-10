@@ -673,6 +673,86 @@ export PAYLATER_TEST_POSTGRES_DSN='postgresql://user:password@localhost:5432/pay
 PYTHONPATH=. pytest -q database/tests app/registry/tests
 ```
 
+## 🔁 CI/CD automation
+
+GitHub Actions provides automated quality gates and build validation. The
+workflows do not connect to PostgreSQL, Redis, MinIO, MLflow, Prefect, or
+external APIs, and they do not publish images or require repository
+credentials.
+
+### Continuous integration
+
+Workflow: `.github/workflows/ci.yml`
+
+CI runs on pull requests and on pushes to `main` or `master` when
+`paylater_engineering/` or workflow files change.
+
+The CI pipeline has three jobs:
+
+1. **Python quality**
+   - Uses Python 3.11.
+   - Compiles `app/` and `database/`.
+   - Installs the test runner.
+   - Runs the repository test suite with `PYTHONPATH=.`.
+   - PostgreSQL integration tests remain skipped unless a test DSN is
+     explicitly provided; CI does not contain database credentials.
+2. **Frontend quality**
+   - Uses Node.js 20.
+   - Runs `npm ci` from `app/frontend/`.
+   - Runs the TypeScript/Vite production build.
+3. **Compose validation**
+   - Runs `docker compose config --quiet`.
+   - Creates a temporary empty `.env` only because Compose declares that file
+     through `env_file`; no credentials or secret values are stored in the
+     workflow.
+   - Validates Compose structure and variable interpolation without starting
+     containers.
+   - Does not start containers or connect to any service.
+
+To reproduce the CI checks locally:
+
+```bash
+cd paylater_engineering
+python3 -m compileall -q app database
+PYTHONPATH=. pytest -q
+
+cd app/frontend
+npm ci
+npm run build
+cd ../..
+
+docker compose config --quiet
+```
+
+### Continuous delivery
+
+Workflow: `.github/workflows/cd.yml`
+
+CD runs on pushes to `main` or `master`, version tags matching `v*.*.*`, and
+manual dispatch. It creates build outputs but does not deploy them:
+
+1. Builds the FastAPI image from `docker/api.Dockerfile`.
+2. Installs frontend dependencies with `npm ci`.
+3. Builds the frontend bundle with Vite.
+4. Uploads the frontend `dist/` directory as a short-lived GitHub Actions
+   artifact.
+
+This is intentionally a build-only delivery stage. Publishing an image to a
+container registry, deploying to infrastructure, or promoting a model requires
+an explicit deployment environment, protected secrets, approvals, and a
+separate production workflow.
+
+### Reading workflow results
+
+1. Open the repository's **Actions** tab.
+2. Select the `CI` or `CD` workflow run.
+3. Inspect the failed job and step logs.
+4. Reproduce the corresponding command locally.
+5. Fix the source branch and push again.
+
+CI/CD status is a quality signal, not proof that external services, model
+artifacts, migrations, or production credentials are correctly configured.
+
 ## ⚠️ Current limitations and production-readiness checklist
 
 The following items should be resolved before calling the platform production
