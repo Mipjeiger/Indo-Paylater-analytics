@@ -1,6 +1,6 @@
-# PayLater Indodana Engineering
+# 💳 PayLater Indodana Engineering
 
-## Production-oriented ML and MLOps platform
+## 🚀 Production-oriented ML and MLOps platform
 
 PayLater Indodana Engineering is a Python-based machine-learning platform for
 pay-later portfolio risk intelligence. The repository combines:
@@ -28,12 +28,12 @@ handler.
 > limitations section below is part of the operating documentation and should
 > be reviewed before production deployment.
 
-## Technology stack
+## 🧰 Technology stack
 
 The following stack is defined by `docker-compose.yml`, the Python dependency
 manifest, and the frontend package manifest:
 
-### Application and API
+### 🌐 Application and API
 
 - **Python 3.11** — runtime used by the API and Prefect containers.
 - **FastAPI** — HTTP API framework.
@@ -45,7 +45,7 @@ manifest, and the frontend package manifest:
 - **TanStack Query** — frontend server-state and request lifecycle management.
 - **Lucide React** — frontend interface icons.
 
-### Data and persistence
+### 🗄️ Data and persistence
 
 - **PostgreSQL 16** — relational source data, model registry metadata,
   predictions, action logs, and drift reports.
@@ -55,7 +55,7 @@ manifest, and the frontend package manifest:
 - **Redis Commander** — local Redis inspection interface.
 - **Apache Parquet and Pandas** — source dataset and tabular data processing.
 
-### Machine learning and feature engineering
+### 🤖 Machine learning and feature engineering
 
 - **CatBoost** — TWP90 binary classification.
 - **LightGBM** — root-cause multiclass classification.
@@ -64,21 +64,21 @@ manifest, and the frontend package manifest:
 - **SHAP** — model explanation support for root-cause modeling.
 - **Feast** — feature-store definitions and online/offline feature retrieval.
 
-### MLOps and artifact management
+### 📦 MLOps and artifact management
 
 - **MLflow** — experiment tracking, model metadata, and artifact management.
 - **MinIO** — S3-compatible object storage for model artifacts.
 - **Prefect** — training workflow orchestration.
 - **python-dotenv** — environment configuration loading.
 
-### Monitoring and platform operations
+### 📈 Monitoring and platform operations
 
 - **Prometheus** — pull-based metrics collection.
 - **Grafana** — metrics dashboards and visualization.
 - **Docker** — application containerization.
 - **Docker Compose** — local multi-service orchestration.
 
-## Business and ML scope
+## 🎯 Business and ML scope
 
 The source dataset is
 `database/dataset/indonesia_fintech_paylater.parquet`. The inspected dataset
@@ -112,7 +112,7 @@ bucket. Temporary files are used only for model serialization during upload;
 the training flows do not intentionally maintain a persistent local model
 directory.
 
-## Architecture
+## 🏗️ Architecture
 
 ```text
                          +----------------------+
@@ -154,7 +154,7 @@ directory.
        +------------------+
 ```
 
-### Service responsibilities
+### 🔌 Service responsibilities
 
 | Service | Compose port | Responsibility |
 |---|---:|---|
@@ -174,7 +174,7 @@ All Compose services use the `paylater_indodana` bridge network. Persistent
 state is stored in named volumes: `pgdata`, `minio_data`, `mlflow_data`,
 `prefect_data`, `prometheus_data`, and `grafana_data`.
 
-## Repository layout
+## 🗂️ Repository layout
 
 ```text
 paylater_engineering/
@@ -202,7 +202,7 @@ paylater_engineering/
 └── .env.example
 ```
 
-## Prerequisites
+## ✅ Prerequisites
 
 Install the following locally:
 
@@ -215,7 +215,7 @@ The main runtime dependencies are installed in the FastAPI image from
 `docker/requirements.txt`. The frontend dependencies are declared in
 `app/frontend/package.json`.
 
-## Configuration
+## ⚙️ Configuration
 
 Configure runtime settings through the deployment environment or an external
 secret manager. Do not copy credentials, passwords, API keys, or local secret
@@ -235,13 +235,13 @@ The Compose file passes service-to-service hostnames such as `postgres`,
 The FastAPI application allows the local Vite origins configured through
 `FRONTEND_ORIGINS`. Update that variable for any non-local deployment.
 
-## Step-by-step local startup and engineering workflow
+## 🛠️ Step-by-step local startup and engineering workflow
 
 The recommended order is **preflight → tests → infrastructure → schema and
 data → MLflow/Prefect → training → API → monitoring → frontend**. Do not start
 model-serving smoke tests before a compatible model has been registered.
 
-### 0. Preflight
+### 0. 🧭 Preflight
 
 Run all commands from the repository directory:
 
@@ -264,7 +264,7 @@ starting Compose. Required service configuration includes PostgreSQL, MinIO,
 Redis, MLflow, Prefect, and Grafana settings. Do not place real credentials in
 the repository or in this README.
 
-### 1. Run local Python and frontend checks
+### 1. 🧪 Run local Python and frontend checks
 
 Run syntax checks before starting services:
 
@@ -297,7 +297,7 @@ cd ../..
 Do not treat a successful frontend build as proof that the backend is healthy;
 the build checks TypeScript and bundling only.
 
-### 2. Start stateful infrastructure
+### 2. 🐳 Start stateful infrastructure
 
 Start the services required by PostgreSQL, ETL, Feast, training artifacts, and
 the API:
@@ -323,7 +323,7 @@ redis-cli -h localhost ping
 PostgreSQL is exposed on `localhost:5432`, Redis on `localhost:6379`, and
 MinIO exposes its API on `localhost:9000` and console on `localhost:9001`.
 
-### 3. Initialize and verify the database
+### 3. 🗃️ Initialize and verify the database
 
 The PostgreSQL container mounts `database/migrations` into its initialization
 directory. Initialization scripts run automatically only when the PostgreSQL
@@ -352,7 +352,7 @@ current SQL creates `paylater.data`, while some existing index statements
 still reference `paylater.database`; correct that mismatch before treating
 migration execution as production-ready.
 
-### 4. Load the Parquet dataset
+### 4. 📥 Load the Parquet dataset
 
 The source file is:
 
@@ -370,7 +370,7 @@ The ETL requires PostgreSQL connectivity and the configured dataset path. Check
 the ETL output and database row counts before training. Do not rerun an ETL
 against a shared environment without confirming its append/upsert behavior.
 
-### 5. Start MLflow and Prefect
+### 5. 🔬 Start MLflow and Prefect
 
 ```bash
 docker compose up -d mlflow prefect
@@ -388,7 +388,7 @@ MLflow stores tracking metadata in PostgreSQL and artifacts in the MinIO
 orchestration server; the training flows still need to be submitted or
 executed with a configured Prefect API URL.
 
-### 6. Execute model training
+### 6. 🧠 Execute model training
 
 The training flows are:
 
@@ -437,7 +437,7 @@ model versions, so uploading a raw object to MinIO alone is not sufficient;
 the artifact must also be registered through the model-serving/registry
 workflow.
 
-### 7. Build and start the FastAPI service
+### 7. ⚡ Build and start the FastAPI service
 
 Rebuild when changing Python dependencies, Docker configuration, or copied
 application files:
@@ -468,7 +468,7 @@ GET  /score/dti-distress/{borrower_id}
 POST /classify/root-cause/{borrower_id}
 ```
 
-### 8. Run API smoke tests
+### 8. 🩺 Run API smoke tests
 
 Health and metrics:
 
@@ -497,7 +497,7 @@ If model registration or artifacts are incomplete, a model endpoint should
 return an explicit service/model error. Do not replace the error with a
 fabricated prediction.
 
-### 9. Start monitoring
+### 9. 📊 Start monitoring
 
 ```bash
 docker compose up -d prometheus grafana
@@ -513,7 +513,7 @@ Prometheus scrapes FastAPI through the Compose network at
 `http://fastapi:8000/metrics/`. Check the Prometheus targets page and confirm
 the `paylater-api` target is up before relying on dashboard values.
 
-### 10. Start the frontend
+### 10. 🖥️ Start the frontend
 
 Configure the frontend API base URL through the local frontend environment:
 
@@ -531,7 +531,7 @@ and root-cause routes. Pages whose aggregation APIs are not registered display
 an explicit unavailable state instead of fabricated borrower, portfolio,
 model, or audit data.
 
-### 11. Stop services
+### 11. 🛑 Stop services
 
 Stop containers while preserving named volumes:
 
@@ -548,7 +548,7 @@ docker compose down
 Do not add `--volumes` unless you intentionally want to delete local
 PostgreSQL, MinIO, MLflow, Prefect, Prometheus, and Grafana state.
 
-## API examples
+## 🔗 API examples
 
 TWP90 assessment:
 
@@ -578,7 +578,7 @@ Prometheus metrics:
 curl http://localhost:8000/metrics/
 ```
 
-## Database and model registry
+## 🧾 Database and model registry
 
 The migration creates the `paylater` schema and these logical tables:
 
@@ -596,7 +596,7 @@ JSONB is reserved for variable-shaped model metadata, predictions, features,
 action metadata, and drift details. Stable source fields remain relational
 columns so they can be indexed and constrained.
 
-## Feature store
+## 🧩 Feature store
 
 `app/feast/` defines:
 
@@ -614,7 +614,7 @@ In particular, target and post-outcome fields are not treated as ordinary
 model inputs. Feature retrieval is designed to occur through Feast rather than
 direct browser access to PostgreSQL or Redis.
 
-## Business actions and safety defaults
+## 🛡️ Business actions and safety defaults
 
 The action layer separates deterministic rule evaluation, action logging, and
 optional notifications. The safe defaults are:
@@ -629,7 +629,7 @@ business policy, idempotency, and audit requirements. Slack notifications are
 optional and require a configured webhook; the application should not depend
 on Slack being present for core scoring.
 
-## Monitoring and observability
+## 📡 Monitoring and observability
 
 Prometheus metrics are defined centrally in `app/monitoring/metrics.py`.
 The FastAPI metrics endpoint is scraped by Prometheus. Drift calculations in
@@ -643,7 +643,7 @@ The FastAPI metrics endpoint is scraped by Prometheus. Drift calculations in
 
 Drift reports can be persisted through `app/monitoring/exporter.py`.
 
-## Development checks
+## 🧪 Development checks
 
 Python syntax checks:
 
@@ -673,7 +673,7 @@ export PAYLATER_TEST_POSTGRES_DSN='postgresql://user:password@localhost:5432/pay
 PYTHONPATH=. pytest -q database/tests app/registry/tests
 ```
 
-## Current limitations and production-readiness checklist
+## ⚠️ Current limitations and production-readiness checklist
 
 The following items should be resolved before calling the platform production
 ready:
@@ -703,7 +703,7 @@ ready:
 8. **Operational tests:** run database, feature-store, model, serving, API,
    and monitoring integration tests against controlled environments.
 
-## External technical references
+## 📚 External technical references
 
 The architecture uses the documented roles of these technologies:
 
