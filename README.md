@@ -447,9 +447,14 @@ docker run --rm \
   sh -c 'cd app/feast && feast apply'
 ```
 
+Apply feast for materialize feature store data
+```bash
+docker exec -it feast sh -c "cd app/feast && feast apply”
+```
+
 To access Feast UI use this docker code definitely
 ```bash
-docker exec -it feast feast -c app/feast ui --port 8888
+docker exec -it feast sh -c "cd app/feast && feast ui --port 8888”
 ```
 
 Do not expose Feast directly to the browser. The API and model-serving
