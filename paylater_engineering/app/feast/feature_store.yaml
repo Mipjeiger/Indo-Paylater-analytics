@@ -1,0 +1,21 @@
+project: paylater_indodana
+provider: local
+
+# Database registry for Feast
+registry: data/registry.db
+
+# Online feature store for Feast using Redis
+online_store:
+  type: redis
+  connection_string: ${REDIS_URL}
+
+# Offline feature store for Feast using Postgres
+offline_store:
+  type: postgres
+  host: ${POSTGRES_HOST}
+  port: ${POSTGRES_PORT}
+  database: ${POSTGRES_DB}
+  db_schema: paylater
+  user: ${POSTGRES_USER}
+  password: ${POSTGRES_PASSWORD}
+entity_key_serialization_version: 3
