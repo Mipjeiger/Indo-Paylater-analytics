@@ -7,5 +7,5 @@ borrower = Entity(
     name="borrower",
     join_keys=["borrower_id"],
     value_type=ValueType.STRING,
-    description="Stable borrower identifier from paylater.data.borrower_id.",
+    description="Stable borrower identifier from paylater.database.borrower_id.",
 )
