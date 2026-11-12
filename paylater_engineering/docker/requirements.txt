@@ -6,7 +6,8 @@ python-dotenv>=1.0.1
 
 # Database dependencies
 sqlalchemy>=2.0.30
-psycopg2-binary>=2.9.9
+psycopg2-binary>=2.9.7
+psycopg[binary]>=3.2.0
 redis>=5.0.4
 
 # MLOps dependencies
@@ -18,7 +19,7 @@ prefect>=3.0.0
 catboost==1.2.5
 lightgbm==4.5.0
 tensorflow>=2.16.1
-numpy>=2.0.0,<3.0.0
+numpy==1.26.4
 pandas==2.2.2
 scikit-learn>=1.5.1
 shap>=0.45.1

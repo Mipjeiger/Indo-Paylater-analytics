@@ -38,16 +38,16 @@ services:
     image: redis/redisinsight:latest
     container_name: redis-ui
     ports:
-      - "8081:8081"
+      - "8081:5540" 
     depends_on:
       - redis
-    environment:
-      - REDIS_HOSTS=local:redis:6379
+    volumes:
+      - redisinsight_data:/data
     networks:
       - paylater_indodana
 
   minio:
-    image: cgr.dev/chainguard/minio:latest
+    image: quay.io/minio/aistor/minio:RELEASE.2026-09-19T17-05-25Z
     container_name: minio
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
@@ -120,6 +120,7 @@ services:
     depends_on:
       - postgres
       - redis
+      - redis-ui
     networks:
       - paylater_indodana
     healthcheck:
@@ -143,9 +144,10 @@ services:
       REDIS_URL: redis://redis:6379/0
     ports:
       - "6566:6566"
+      - "8888:8888"
     volumes:
       - .:/workspace
-      - ./.feast-data:/workspace/app/feast/data   # Persists the Feast registry locally
+      - ./app/feast/data:/workspace/app/feast/data
     working_dir: /workspace
     command: ["feast", "-c", "app/feast", "serve", "--host", "0.0.0.0", "--port", "6566"]
     depends_on:
@@ -193,16 +195,18 @@ services:
     ports:
       - "4200:4200"
     environment:
-      PREFECT_API_URL: http://prefect:4200/api
-      PREFECT_ORION_UI_API_URL: http://prefect:4200/api
+      PREFECT_API_URL: http://127.0.0.1:4200/api
+      PREFECT_SERVER_UI_API_URL: http://localhost:4200/api
       PREFECT_SERVER_ANALYTICS_ENABLED: false
       PREFECT_SERVER_API_HOST: 0.0.0.0
-    networks:
-      - paylater_indodana
     volumes:
       - prefect_data:/root/.prefect
+    depends_on:
+      - mlflow
+    networks:
+      - paylater_indodana
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4200/api"]
+      test: ["CMD", "curl", "-f", "http://localhost:4200/api/health"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -250,6 +254,7 @@ volumes:
   prefect_data:
   prometheus_data:
   grafana_data:
+  redisinsight_data:
 
 networks:
   paylater_indodana:

@@ -7,7 +7,7 @@ registry: data/registry.db
 # Online feature store for Feast using Redis
 online_store:
   type: redis
-  connection_string: ${REDIS_URL}
+  connection_string: "redis://redis:6379/0"
 
 # Offline feature store for Feast using Postgres
 offline_store:
@@ -16,6 +16,6 @@ offline_store:
   port: ${POSTGRES_PORT}
   database: ${POSTGRES_DB}
   db_schema: paylater
-  user: ${POSTGRES_USER}
+  user: ${POSTGRES_USER}  
   password: ${POSTGRES_PASSWORD}
 entity_key_serialization_version: 3
