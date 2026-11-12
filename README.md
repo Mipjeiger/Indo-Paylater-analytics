@@ -483,11 +483,16 @@ executed with a configured Prefect API URL.
 The training flows are:
 
 ```text
+Task 1: Training TWP90 flows
 docker compose exec -e PREFECT_API_URL=http://prefect:4200/api fastapi python -c "from app.training.flows.task1_twp90 import task1_flow; print(task1_flow())"
-docker compose exec -e PREFECT_API_URL=http://prefect:4200/api fastapi sh -lc \
-'set -a; . .env; set +a; python -c "from app.training.flows.task2_dti_distress import task2_flow; print(task2_flow(\"/workspace/database/dataset/indonesia_fintech_paylater.parquet\"))"'
-docker compose exec -e PREFECT_API_URL=http://prefect:4200/api fastapi sh -lc \
-'set -a; . .env; set +a; python -c "from app.training.flows.task3_root_cause import task3_flow; print(task3_flow(\"/workspace/database/dataset/indonesia_fintech_paylater.parquet\"))"'
+
+Task 2: DTI Distress Training Flow
+docker compose exec -e PREFECT_API_URL=http://prefect:4200/api fastapi python -c \
+"from app.training.flows.task2_dti_distress import task2_flow; print(task2_flow('/workspace/database/dataset/indonesia_fintech_paylater.parquet'))"
+
+Task 3: Root Cause Analysis Training Flow
+docker compose exec -e PREFECT_API_URL=http://prefect:4200/api fastapi python -c \
+"from app.training.flows.task3_root_cause import task3_flow; print(task3_flow('/workspace/database/dataset/indonesia_fintech_paylater.parquet'))"
 ```
 
 Before training, confirm:
