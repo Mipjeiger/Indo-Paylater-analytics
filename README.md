@@ -483,9 +483,11 @@ executed with a configured Prefect API URL.
 The training flows are:
 
 ```text
-app.training.flows.task1_twp90.task1_flow
-app.training.flows.task2_dti_distress.task2_flow
-app.training.flows.task3_root_cause.task3_flow
+docker compose exec -e PREFECT_API_URL=http://prefect:4200/api fastapi python -c "from app.training.flows.task1_twp90 import task1_flow; print(task1_flow())"
+docker compose exec -e PREFECT_API_URL=http://prefect:4200/api fastapi sh -lc \
+'set -a; . .env; set +a; python -c "from app.training.flows.task2_dti_distress import task2_flow; print(task2_flow(\"/workspace/database/dataset/indonesia_fintech_paylater.parquet\"))"'
+docker compose exec -e PREFECT_API_URL=http://prefect:4200/api fastapi sh -lc \
+'set -a; . .env; set +a; python -c "from app.training.flows.task3_root_cause import task3_flow; print(task3_flow(\"/workspace/database/dataset/indonesia_fintech_paylater.parquet\"))"'
 ```
 
 Before training, confirm:
