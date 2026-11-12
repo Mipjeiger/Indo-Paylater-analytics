@@ -8,7 +8,6 @@ from feast.types import Float64, Int64, String
 from app.feast.data_sources import paylater_data_source
 from app.feast.entities import borrower
 
-
 twp90_signals = FeatureView(
     name="twp90_signals",
     entities=[borrower],

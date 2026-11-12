@@ -50,9 +50,11 @@ def postgres_database():
     from app.registry.db import Database
 
     database = Database.from_url(url)
+
     try:
         database.check_connection()
         database.run_migrations()
+    
     except RuntimeError as exc:
         database.dispose()
         pytest.skip(str(exc))
