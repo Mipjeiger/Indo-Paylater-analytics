@@ -429,18 +429,72 @@ docker logs --follow paylater-feast
 
 `feast apply` does not populate Redis. It registers the entity and feature-view
 metadata only. Materialize the PostgreSQL source into the Feast Redis online
-store after the source table contains data:
+store after the source table contains data. The online-store configuration sets
+`key_ttl_seconds: 3600`, so each materialized Feast feature key expires one hour
+after it is written:
 
 ```bash
+END_TS=$(docker exec feast date -u +%Y-%m-%dT%H:%M:%S)
 docker exec feast sh -c \
-  'cd app/feast && feast materialize-incremental'
+  "cd app/feast && feast materialize-incremental ${END_TS}"
 ```
+
+If the one-hour TTL was added or changed after keys were already materialized,
+run materialization again so Feast rewrites those keys with the new expiration:
+
+```bash
+END_TS=$(docker exec feast date -u +%Y-%m-%dT%H:%M:%S)
+docker exec feast sh -c \
+  "cd app/feast && feast materialize-incremental ${END_TS}"
+```
+
+This expires Feast feature keys, not the Redis database itself. RedisInsight
+configuration data is stored separately in the `redisinsight_data` volume.
+
+#### Restore redis keys after the one-hour expiration
+
+When the Feast keys have expired, restore them from PostgreSQL with a full
+materialization. Do not rely only on `materialize-incremental`: its start time
+can be after the historical rows that need to be restored.
+
+1. Confirm that the PostgreSQL source still contains data:
+
+   ```bash
+   docker exec postgres sh -c \
+     'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT COUNT(*) FROM paylater.database"'
+   ```
+
+2. Apply the current Feast definitions:
+
+   ```bash
+   docker exec feast sh -c 'cd app/feast && feast apply'
+   ```
+
+3. Materialize the complete source history through the current UTC time:
+
+   ```bash
+   END_TS=$(docker exec feast date -u +%Y-%m-%dT%H:%M:%S)
+   docker exec feast sh -c \
+     "cd app/feast && feast materialize 1970-01-01T00:00:00 ${END_TS}"
+   ```
+
+4. Verify that keys have returned and have the one-hour TTL:
+
+   ```bash
+   docker exec redis redis-cli DBSIZE
+   docker exec feast sh -c \
+     'python -c "import redis; c=redis.Redis(host=\"redis\", port=6379); k=next(c.scan_iter(), None); print(c.ttl(k) if k else \"no keys\")"'
+   ```
+
+The last command should report a value close to `3600`. Repeat the full
+materialization only when the keys have expired or a historical rebuild is
+required. Use incremental materialization for normal new data.
 
 For a reproducible time window, use explicit UTC timestamps instead:
 
 ```bash
 docker exec feast sh -c \
-  'cd app/feast && feast materialize --start 2020-01-01T00:00:00 --end 2030-01-01T00:00:00'
+  'cd app/feast && feast materialize 2020-01-01T00:00:00 2030-01-01T00:00:00'
 ```
 
 Verify that Feast has materialized feature keys:
