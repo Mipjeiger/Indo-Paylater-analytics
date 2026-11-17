@@ -1,9 +1,7 @@
-"""Persistence helper for structured drift reports."""
-
 from typing import Any
-
 from sqlalchemy import text
 
+"""Persistence helper for structured drift reports."""
 
 def persist_drift_report(database: Any, task_name: str, report: dict[str, Any]) -> int:
     if not task_name:

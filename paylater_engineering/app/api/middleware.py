@@ -1,11 +1,8 @@
 """HTTP metrics middleware."""
 
 import time
-
 from fastapi import FastAPI, Request
-
 from app.monitoring.metrics import HTTP_LATENCY, HTTP_REQUESTS
-
 
 def setup_middleware(app: FastAPI) -> None:
     @app.middleware("http")
