@@ -28,6 +28,8 @@ services:
       - "6379:6379"
     networks:
       - paylater_indodana
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -106,9 +108,12 @@ services:
       ENABLE_PROMETHEUS_EXPORTER: "true"
       PREFECT_API_URL: http://prefect:4200/api
       FRONTEND_ORIGIN: http://localhost:8085
-      FRONTEND_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173
+      FRONTEND_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173,http://localhost:8085,http://127.0.0.1:8085
       ACTION_KILL_SWITCH: "0"
       AUTO_BLOCK: "0"
+      SLACK_NOTIFY_ON_API_HIT: ${SLACK_NOTIFY_ON_API_HIT}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+      ADMIN_DEV_ENDPOINTS: "1"
     ports:
       - "8000:8000"
     volumes:
@@ -247,14 +252,36 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── Frontend ──────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        VITE_API_BASE_URL: ""
+    container_name: frontend
+    ports:
+      - "8085:80"
+    depends_on:
+      - fastapi
+    networks:
+      - paylater_indodana
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health.txt"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
 volumes:
   pgdata:
+  redisinsight_data:
+  redis_data:
   minio_data:
   mlflow_data:
   prefect_data:
   prometheus_data:
   grafana_data:
-  redisinsight_data:
 
 networks:
   paylater_indodana:
