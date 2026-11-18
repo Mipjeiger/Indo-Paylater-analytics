@@ -7,3 +7,5 @@ paylater_engineering/.env.example
 .pytest_cache
 paylater_engineering/app/frontend/node_modules
 paylater_engineering/app/serving/tests/features_body.md
+**mlflow.db
+paylater_engineering/catboost_info

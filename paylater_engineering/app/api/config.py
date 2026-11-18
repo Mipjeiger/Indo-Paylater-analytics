@@ -60,5 +60,6 @@ class Settings():
 
     # ── Slack ──
     SLACK_WEBHOOK_URL: str = os.getenv("SLACK_WEBHOOK_URL")
+    SLACK_NOTIFY_ON_API_HIT: bool = os.getenv("SLACK_NOTIFY_ON_API_HIT", "0").strip().lower() in {"1", "true", "yes"}
 
 settings = Settings()

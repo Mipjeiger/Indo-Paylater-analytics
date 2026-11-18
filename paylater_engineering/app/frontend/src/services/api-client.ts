@@ -1,6 +1,6 @@
 import type { ApiError } from "../types/api";
 
-const baseUrl = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");
+const baseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
 export async function apiRequest<T>(
   path: string,

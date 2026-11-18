@@ -47,6 +47,10 @@ button { cursor: pointer; }
 .metric-value { display: block; color: #1b3558; font-size: 20px; margin: 10px 0 7px; }
 .metric-detail { color: #8b9aaa; font-size: 10px; }
 .panel-grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; margin-top: 20px; }
+.table-wrap { overflow-x: auto; }
+.table-wrap table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.table-wrap th, .table-wrap td { padding: 10px 12px; border-bottom: 1px solid #edf1f5; text-align: left; white-space: nowrap; }
+.table-wrap th { color: #718398; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
 .panel { padding: 22px; }
 .panel-heading { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
 .panel h3 { margin: 5px 0 0; font-size: 15px; }

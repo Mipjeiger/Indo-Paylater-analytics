@@ -1,12 +1,12 @@
-"""FastAPI application for PayLater Indodana."""
-
 import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.middleware import setup_middleware
-from app.api.routers import classify, health, metrics, score
+from app.api.routers import aggregate, classify, health, metrics, score, admin
+
+"""FastAPI application for PayLater Indodana."""
 
 app = FastAPI(title="PayLater Indodana ML API", version="1.0.0")
 
@@ -33,3 +33,5 @@ app.include_router(health.router, prefix="/health", tags=["health"])
 app.include_router(score.router, prefix="/score", tags=["score"])
 app.include_router(classify.router, prefix="/classify", tags=["classify"])
 app.include_router(metrics.router, prefix="/metrics", tags=["metrics"])
+app.include_router(admin.router, prefix="/admin", tags=["admin"])
+app.include_router(aggregate.router, prefix="/api/v1", tags=["frontend-api"])
