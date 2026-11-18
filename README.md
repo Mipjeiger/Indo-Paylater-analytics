@@ -825,6 +825,63 @@ business policy, idempotency, and audit requirements. Slack notifications are
 optional and require a configured webhook; the application should not depend
 on Slack being present for core scoring.
 
+### Monitoring and Slack automation
+
+Drift and action metrics are exported through `/metrics/` and scraped by
+Prometheus:
+
+```text
+paylater_drift_detected
+paylater_action_outcomes_total
+```
+
+Grafana is provisioned with the Prometheus datasource and the
+`PayLater Monitoring` dashboard. Open:
+
+- Grafana: <http://localhost:3000>
+- Prometheus: <http://localhost:9090>
+- Metrics: <http://localhost:8000/metrics/>
+
+`DRIFT_STATUS` is populated by `persist_drift_report()` for each feature in a
+drift report. `ACTION_OUTCOMES` is incremented by `block_borrower()` and Slack
+delivery outcomes. The metrics module initializes zero-valued baseline label
+sets so Grafana can query the metrics before the first real event.
+
+To enable API-hit Slack delivery, set these runtime variables in the Compose
+environment without writing values to source control:
+
+```dotenv
+SLACK_NOTIFY_ON_API_HIT=1
+SLACK_WEBHOOK_URL=<incoming-webhook-url>
+```
+
+Restart FastAPI and Grafana after changing runtime configuration:
+
+```bash
+docker compose up -d --build fastapi grafana prometheus
+docker compose restart fastapi grafana prometheus
+docker compose ps fastapi grafana prometheus
+```
+
+The root-cause, TWP90, and DTI endpoints send notifications as FastAPI
+background tasks after success or a handled `503` inference failure. Health
+checks and Prometheus metric scrapes do not generate Slack messages.
+
+Verify Slack delivery with the root-cause endpoint:
+
+```bash
+curl --fail -X POST http://localhost:8000/classify/root-cause/ID_DEB_0DE3583B12 \
+  -H "Content-Type: application/json" \
+  -d 'features: {...}'
+```
+
+Verify metrics directly:
+
+```bash
+curl --fail http://localhost:8000/metrics/ |
+  grep -E 'paylater_(drift_detected|action_outcomes_total|http_requests_total)'
+```
+
 ## 📡 Monitoring and observability
 
 Prometheus metrics are defined centrally in `app/monitoring/metrics.py`.
