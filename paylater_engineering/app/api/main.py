@@ -8,7 +8,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.middleware import setup_middleware
 from app.api.routers import classify, health, metrics, score
 
-
 app = FastAPI(title="PayLater Indodana ML API", version="1.0.0")
 
 frontend_origins = [
