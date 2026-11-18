@@ -1,6 +1,7 @@
 import os
 from typing import Any
 from sqlalchemy import text
+from app.monitoring.metrics import ACTION_OUTCOMES
 
 """Safe borrower action service with approval and audit requirements."""
 
@@ -14,11 +15,12 @@ def block_borrower(
     approved_by: str | None = None,
 ) -> dict[str, Any]:
     if not all((borrower_id, rule_code, reason, idempotency_key)):
-        raise ValueError("borrower_id, rule_code, reason, and idempotency_key are required")
+        raise ValueError("borrower_id, rule_code, reason, and idempotency_key are required")    
     if os.getenv("ACTION_KILL_SWITCH", "0") == "1":
         status = "disabled"
     elif os.getenv("AUTO_BLOCK", "0") == "1" and approved_by:
         status = "approved"
+
     else:
         status = "pending_approval"
     statement = text(
@@ -43,6 +45,13 @@ def block_borrower(
                 "key": idempotency_key,
             },
         ).scalar()
+
+    # --- metric: count the terminal outcome - means 'identifier' is None on dedupe dashboard reportly
+    if identifier is None:
+        ACTION_OUTCOMES.labels(action="block", status="deduped").inc()
+    else:
+        ACTION_OUTCOMES.labels(action="block", status=status).inc()
+
     return {
         "borrower_id": borrower_id,
         "action_type": "block",

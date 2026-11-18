@@ -58,4 +58,7 @@ class Settings():
     # ── Feast ──
     #FEAST_REPO_PATH = Path("feature_store")
 
+    # ── Slack ──
+    SLACK_WEBHOOK_URL: str = os.getenv("SLACK_WEBHOOK_URL")
+
 settings = Settings()
