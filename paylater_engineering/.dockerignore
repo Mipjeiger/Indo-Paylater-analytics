@@ -1,0 +1,31 @@
+# ── Node / build artifacts ─────────────────────────────────
+app/frontend/node_modules
+app/frontend/.vite
+app/frontend/dist
+
+# ── Python / ML engineering ────────────────────────────────
+app/api
+app/actions
+app/feast
+app/monitoring
+app/registry
+app/serving
+app/training
+database
+grafana
+prometheus
+*.py
+*.pyc
+__pycache__
+
+# ── Dev / test files ────────────────────────────────────────
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+*.log
+*.md
+.pytest_cache
+.DS_Store
+minio.license
