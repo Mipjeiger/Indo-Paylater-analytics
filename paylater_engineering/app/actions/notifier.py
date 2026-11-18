@@ -9,6 +9,15 @@ from app.api.config import settings
 
 logger = logging.getLogger(__name__)
 
+def notify_api_hit(endpoint: str, borrower_id: str, status: str, detail: str = "") -> dict[str, Any]:
+    if not settings.SLACK_NOTIFY_ON_API_HIT:
+        return {"channel": "api", "delivered": False, "reason": "api_notifications_disabled"}
+
+    message = f"PayLater API {status}: {endpoint} borrower={borrower_id}"
+    if detail:
+        message += f" detail={detail}"
+    return send_notification("api", message)
+
 def send_notification(channel: str, message: str, *, timeout: float = 5.0) -> dict[str, Any]:
     webhook = settings.SLACK_WEBHOOK_URL
     if not webhook:
