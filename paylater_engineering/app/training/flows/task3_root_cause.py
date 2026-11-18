@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-import os
+import json
 import tempfile
 from pathlib import Path
 from typing import Any
 
 import lightgbm as lgb
 import mlflow
+import mlflow.pyfunc
 import pandas as pd
+import numpy as np
 import shap
 from prefect import flow, task
 from sklearn.metrics import balanced_accuracy_score, cohen_kappa_score
@@ -19,6 +21,23 @@ from app.api.config import settings
 from app.training.flows.artifacts import MinioArtifactStore
 
 """Prefect LightGBM root-cause classification training flow."""
+
+class LGBMRootCausePyfunc(mlflow.pyfunc.PythonModel):
+    """Pyfunc wrapper that carries categorical encoding + class labels."""
+    def __init__(self, booster, cat_categories: dict[str, list[str]], class_labels: list[str]):
+        self.booster = booster
+        self.cat_categories = cat_categories
+        self.class_labels = class_labels
+
+    def predict(self, context, model_input: pd.DataFrame):
+        df = model_input.copy()
+
+        for col, categories in self.cat_categories.items():
+            if col in df.columns:
+                codes = pd.Categorical(df[col], categories=categories).codes
+                df[col] = pd.Series(codes, index=df.index).replace(-1, np.nan)
+
+        return self.booster.predict(df)
 
 TARGET = "primary_default_root_cause"
 EXPECTED_LABELS = {
@@ -194,36 +213,47 @@ def train_root_cause(data_source: str | pd.DataFrame) -> dict[str, Any]:
             )
             best_model = trained_models[best_name]
 
+            # Add cat categories to get experience in features
+            cat_categories = {
+                col: train_x[col].cat.categories.tolist()
+                for col in train_x.select_dtypes(include=["category"]).columns
+            }
+
             # MLflow logs
-            mlflow.log_param("best_model", best_name)
+            mlflow.log_param("best_model_by_qwk", best_name)
             mlflow.log_param("features", ",".join(train_x.columns))
+            mlflow.log_param("cat_categories", json.dumps(cat_categories))
             mlflow.log_param("n_features", len(train_x.columns))
             mlflow.log_param("class_labels", ",".join(encoder.classes_.tolist()))
 
-            if best_name == "lightgbm":
-                model_info = mlflow.lightgbm.log_model(
-                    lgb_model=best_model,
-                    artifact_path="model",
-                    registered_model_name="paylater_root_cause",
-                )
-            else:
-                model_info = mlflow.sklearn.log_model(
-                    sk_model=best_model,
-                    artifact_path="model",
-                    registered_model_name="paylater_root_cause",
-                )
+            # ─── Register LightGBM unconditionally — it's the model serving is written for.
+            model_info = mlflow.pyfunc.log_model(
+                artifact_path="model",
+                python_model=LGBMRootCausePyfunc(
+                    booster=trained_models["lightgbm"].booster_,
+                    cat_categories=cat_categories,
+                    class_labels=encoder.classes_.tolist(),
+                ),
+                registered_model_name="paylater_root_cause",
+                pip_requirements=[
+                    "mlflow",
+                    "lightgbm",
+                    "pandas",
+                    "numpy",
+                ],
+            )
 
             # Client for tracking mlflow model versions
             client = mlflow.tracking.MlflowClient()
             client.transition_model_version_stage(
                 name="paylater_root_cause",
-                version=model_info.model_version,
+                version=model_info.registered_model_version,
                 stage="Staging",
             )
     
     return {
         "model_paths": model_uris,
-        "bst_model": best_name,
+        "best_model": best_name,
         "model_version": model_info.registered_model_version,
         "labels": encoder.classes_.tolist(),
         "metrics": all_metrics,
