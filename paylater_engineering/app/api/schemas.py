@@ -21,3 +21,5 @@ class RootCauseResponse(BaseModel):
     borrower_id: str
     root_cause: str
     model_version: str | None = None
+    confidence: float
+    block: dict | None = None

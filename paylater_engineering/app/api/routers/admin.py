@@ -8,7 +8,8 @@ from app.actions.blocker import block_borrower
 from app.actions.notifier import send_notification
 from app.registry.db import create_database_engine
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+# Build /admin router prefix for API notifications
+router = APIRouter()
 _engine = create_database_engine()
 
 class _DB:
