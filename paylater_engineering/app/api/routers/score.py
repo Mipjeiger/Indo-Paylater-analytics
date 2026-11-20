@@ -22,6 +22,8 @@ def score_twp90(request: TWP90Request, background_tasks: BackgroundTasks):
             str(exc),
         )
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    # ─── Notify API hit for successful scoring
     background_tasks.add_task(
         notify_api_hit,
         "POST /score/twp90",
@@ -48,6 +50,7 @@ def score_dti_distress(
         )
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    # ─── Notify API hit for successful scoring
     background_tasks.add_task(
         notify_api_hit,
         "GET /score/dti-distress/{borrower_id}",

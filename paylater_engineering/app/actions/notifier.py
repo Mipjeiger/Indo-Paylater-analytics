@@ -1,5 +1,5 @@
 import logging
-import os
+import time
 from typing import Any
 import requests
 from app.monitoring.metrics import ACTION_OUTCOMES
@@ -9,9 +9,20 @@ from app.api.config import settings
 
 logger = logging.getLogger(__name__)
 
+_last_failure_alert: dict[str, float] = {}
+_FAILURE_ALERT_INTERVAL = 60.0   # one alert per minute per key
+
 def notify_api_hit(endpoint: str, borrower_id: str, status: str, detail: str = "") -> dict[str, Any]:
     if not settings.SLACK_NOTIFY_ON_API_HIT:
         return {"channel": "api", "delivered": False, "reason": "api_notifications_disabled"}
+
+    # Rate-limit all statuses except block triggered and failed
+    if status not in ("block_triggered", "block_failed"):
+        now = time.monotonic()
+        last = _last_failure_alert.get(status, 0.0)
+        if now - last < _FAILURE_ALERT_INTERVAL:
+            return {"channel": "api", "delivered": False, "reason": "rate_limited"}
+        _last_failure_alert[status] = now
 
     message = f"PayLater API {status}: {endpoint} borrower={borrower_id}"
     if detail:

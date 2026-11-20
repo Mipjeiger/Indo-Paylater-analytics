@@ -18,9 +18,9 @@ class _DB:
 
 @router.post("/root-cause/{borrower_id}", response_model=RootCauseResponse)
 def classify_root_cause(
-    borrower_id: str, 
-    request: TWP90Request, 
-    background_tasks: BackgroundTasks
+    borrower_id: str,
+    request: TWP90Request,
+    background_tasks: BackgroundTasks,
 ):
     try:
         result = predict_root_cause(request.features)
@@ -28,35 +28,29 @@ def classify_root_cause(
         background_tasks.add_task(
             notify_api_hit,
             "POST /classify/root-cause/{borrower_id}",
-            borrower_id,
-            "failed",
-            str(exc),
+            borrower_id, "failed", str(exc),
         )
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    # ─── Evaluate rules from the request features
+    # Evaluate rules
     try:
         matches = evaluate_rules(borrower_id, request.features)
     except ValueError as exc:
         background_tasks.add_task(
             notify_api_hit,
             "POST /classify/root-cause/{borrower_id}",
-            borrower_id,
-            "rule_config_error",
-            str(exc),
+            borrower_id, "rule_config_error", str(exc),
         )
         matches = []
 
-    # ─── Block borrower for matched rules
+    # Fire block for the TOP match only (Fix 2 from previous message)
     block_outcome = None
     if matches:
-        top = matches[0] # Highest priority rule
-        all_matched = ",".join(m["rule_code"] for m in matches)
+        top = matches[0]
         reason = (
-            f"{top['reason']}; matched={all_matched}; "
+            f"{top['reason']}; "
             f"root_cause={result['root_cause']} "
-            f"(confidence={result['confidence']:.2f}, "
-            #f"model_version={result['model_version']})"
+            f"(confidence={result['confidence']:.2f})"
         )
         try:
             block_outcome = block_borrower(
@@ -66,18 +60,25 @@ def classify_root_cause(
                 reason=reason,
                 idempotency_key=top["idempotency_key"],
             )
+            # ONLY notify on actual block trigger (not on success)
+            background_tasks.add_task(
+                notify_api_hit,
+                "POST /classify/root-cause/{borrower_id}",
+                borrower_id, "block_triggered",
+                f"rule={top['rule_code']} status={block_outcome['action_status']}",
+            )
         except Exception as exc:
             background_tasks.add_task(
                 notify_api_hit,
                 "POST /classify/root-cause/{borrower_id}",
-                borrower_id,
-                "block_failed",
+                borrower_id, 
+                "block_failed", 
                 str(exc),
             )
-            raise HTTPException(status_code=503, detail="Block action failed") from exc
-    
+
+    # NO success notification
     return {
-        "borrower_id": borrower_id,
-        **result,
-        "block": block_outcome,
+        "borrower_id": borrower_id, 
+        **result, 
+        "block": block_outcome
     }
