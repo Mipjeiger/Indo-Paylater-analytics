@@ -48,43 +48,36 @@ def classify_root_cause(
         matches = []
 
     # ─── Block borrower for matched rules
-    block_outcomes = []
-    for match in matches:
+    block_outcome = None
+    if matches:
+        top = matches[0] # Highest priority rule
+        all_matched = ",".join(m["rule_code"] for m in matches)
         reason = (
-            f"{match['reason']}; root_cause={result['root_cause']}"
-            f"(confidence={result['confidence']:.2f}),"
-            f"model_version={result['model_version']}"
+            f"{top['reason']}; matched={all_matched}; "
+            f"root_cause={result['root_cause']} "
+            f"(confidence={result['confidence']:.2f}, "
+            #f"model_version={result['model_version']})"
         )
         try:
-            # Identify block borrower with required parameters
-            outcome = block_borrower(
+            block_outcome = block_borrower(
                 database=_DB(_engine),
                 borrower_id=borrower_id,
-                rule_code=match["rule_code"],
+                rule_code=top["rule_code"],
                 reason=reason,
-                idempotency_key=match["idempotency_key"],
+                idempotency_key=top["idempotency_key"],
             )
-            block_outcomes.append(outcome)
         except Exception as exc:
             background_tasks.add_task(
                 notify_api_hit,
                 "POST /classify/root-cause/{borrower_id}",
                 borrower_id,
                 "block_failed",
-                f"rule={match['rule_code']} err={exc}",
+                str(exc),
             )
-
-    # Background task to notify API hit with success and block outcomes
-    background_tasks.add_task(
-        notify_api_hit,
-        "POST /classify/root-cause/{borrower_id}",
-        borrower_id,
-        "success",
-        f"root_cause={result['root_cause']} blocks={len(block_outcomes)}"
-    )
-
+            raise HTTPException(status_code=503, detail="Block action failed") from exc
+    
     return {
         "borrower_id": borrower_id,
         **result,
-        "block": block_outcomes[0] if len(block_outcomes) == 1 else block_outcomes or None,
+        "block": block_outcome,
     }
