@@ -198,7 +198,7 @@ def portfolio_by_borrower(borrower_id: str, database=Depends(get_db)):
                 WHERE borrower_id = :borrower_id
                 ORDER BY created_at DESC
                 LIMIT 20
-                """,
+                """,    
                 {"borrower_id": borrower_id},
             )
 
@@ -219,6 +219,7 @@ def portfolio_by_borrower(borrower_id: str, database=Depends(get_db)):
         result["recent_actions"] = actions
         result["recent_predictions"] = predictions
         return result
+    
     except HTTPException:
         raise
     except Exception as exc:

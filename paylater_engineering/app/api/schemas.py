@@ -22,4 +22,4 @@ class RootCauseResponse(BaseModel):
     root_cause: str
     model_version: str | None = None
     confidence: float
-    block: dict | None = None
+    block: list[dict] | None = None
