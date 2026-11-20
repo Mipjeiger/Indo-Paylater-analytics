@@ -21,14 +21,12 @@ def _json_value(value: Any) -> Any:
         return value.to_dict()
     return value
 
-
 def _rows(connection: Any, statement: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     result = connection.execute(text(statement), params or {})
     return [
         {key: _json_value(value) for key, value in row.items()}
         for row in result.mappings()
     ]
-
 
 @router.get("/dashboard/kpis")
 def dashboard_kpis(database=Depends(get_db)):
@@ -60,7 +58,6 @@ def dashboard_kpis(database=Depends(get_db)):
         return {key: _json_value(value) for key, value in row.items()}
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Dashboard data unavailable") from exc
-
 
 @router.get("/borrowers")
 def borrowers(
@@ -153,6 +150,79 @@ def portfolio_summary(database=Depends(get_db)):
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Portfolio data unavailable") from exc
 
+@router.get("/portfolio/{borrower_id}")
+def portfolio_by_borrower(borrower_id: str, database=Depends(get_db)):
+    try:
+        with database.engine.connect() as connection:
+            row = connection.execute(
+                text(
+                    """
+                    SELECT
+                        borrower_id,
+                        age,
+                        gender,
+                        province,
+                        education_level,
+                        employment_status,
+                        monthly_income_idr,
+                        total_loan_outstanding_idr,
+                        credit_limit_granted_idr,
+                        credit_limit_utilization_ratio,
+                        debt_to_income_ratio,
+                        days_past_due,
+                        financial_distress_index,
+                        risk_score,
+                        risk_short,
+                        is_high_risk,
+                        twp90_default_status,
+                        primary_default_root_cause,
+                        primary_loan_purpose,
+                        updated_at
+                    FROM paylater.database
+                    WHERE borrower_id = :borrower_id
+                    """
+                ),
+                {"borrower_id": borrower_id},
+            ).mappings().one_or_none()
+
+            if row is None:
+                raise HTTPException(status_code=404, detail="Borrower not found")
+
+            # Also fetch decisions/actions for this borrower
+            actions = _rows(
+                connection,
+                """
+                SELECT id, borrower_id, action_type, action_status, rule_code,
+                       recommendation, executed_by, idempotency_key, created_at
+                FROM paylater.actions_log
+                WHERE borrower_id = :borrower_id
+                ORDER BY created_at DESC
+                LIMIT 20
+                """,
+                {"borrower_id": borrower_id},
+            )
+
+            # Fetch predictions for this borrower
+            predictions = _rows(
+                connection,
+                """
+                SELECT id, borrower_id, task_name, prediction, created_at
+                FROM paylater.predictions
+                WHERE borrower_id = :borrower_id
+                ORDER BY created_at DESC
+                LIMIT 20
+                """,
+                {"borrower_id": borrower_id},
+            )
+
+        result = {key: _json_value(value) for key, value in row.items()}
+        result["recent_actions"] = actions
+        result["recent_predictions"] = predictions
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Borrower portfolio data unavailable") from exc
 
 @router.get("/models")
 def model_versions(database=Depends(get_db)):
