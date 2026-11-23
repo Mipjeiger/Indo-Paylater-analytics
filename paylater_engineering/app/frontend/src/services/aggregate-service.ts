@@ -1,6 +1,7 @@
 import { apiRequest } from "./api-client";
 import type {
   AuditEvent,
+  BorrowerPortfolioRecord,
   BorrowerRecord,
   DecisionRecord,
   ModelVersionRecord,
@@ -20,6 +21,10 @@ export function getDecisions(limit = 50, offset = 0, signal?: AbortSignal) {
     undefined,
     signal,
   );
+}
+
+export function getBorrowerPortfolio(borrowerId: string, signal?: AbortSignal) {
+  return apiRequest<BorrowerPortfolioRecord>(`/api/v1/portfolio/${encodeURIComponent(borrowerId)}`, undefined, signal);
 }
 
 export function getPortfolioSummary(signal?: AbortSignal) {

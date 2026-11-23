@@ -35,6 +35,8 @@ export type DashboardKpis = {
   outstanding_exposure: number;
   repayment_rate: number;
   twp90_rate: number;
+  average_dti?: number;
+  high_risk_count?: number;
 };
 
 export type PaginatedResponse<T> = {
@@ -53,12 +55,17 @@ export type BorrowerRecord = {
   employment_status: string | null;
   monthly_income_idr: number | null;
   total_loan_outstanding_idr: number | null;
+  credit_limit_granted_idr?: number | null;
+  credit_limit_utilization_ratio?: number | null;
   debt_to_income_ratio: number | null;
+  days_past_due?: number | null;
+  financial_distress_index?: number | null;
   risk_score: number | null;
   risk_short: string | null;
   is_high_risk: boolean | null;
   twp90_default_status: string | null;
   primary_default_root_cause: string | null;
+  primary_loan_purpose?: string | null;
   updated_at: string | null;
 };
 
@@ -80,6 +87,33 @@ export type PortfolioSummary = {
   average_dti: number;
   high_risk_borrowers: number;
   defaulted_borrowers: number;
+  average_utilization_rate?: number;
+  average_recovery_rate?: number;
+};
+
+export type BorrowerPortfolioRecord = {
+  borrower_id: string;
+  age: number | null;
+  gender: string | null;
+  province: string | null;
+  education_level: string | null;
+  employment_status: string | null;
+  monthly_income_idr: number | null;
+  total_loan_outstanding_idr: number | null;
+  credit_limit_granted_idr: number | null;
+  credit_limit_utilization_ratio: number | null;
+  debt_to_income_ratio: number | null;
+  days_past_due: number | null;
+  financial_distress_index: number | null;
+  risk_score: number | null;
+  risk_short: string | null;
+  is_high_risk: boolean | null;
+  twp90_default_status: string | null;
+  primary_default_root_cause: string | null;
+  primary_loan_purpose: string | null;
+  updated_at: string | null;
+  recent_actions: DecisionRecord[];
+  recent_predictions: Record<string, unknown>[];
 };
 
 export type ModelVersionRecord = {
