@@ -1,11 +1,15 @@
 """Cached TWP90 model loading and validated inference."""
 
+from __future__ import annotations
+
 from functools import lru_cache
 from typing import Any
 
 import mlflow
+import numpy as np
 import pandas as pd
 from mlflow.tracking import MlflowClient
+from app.monitoring.metrics import MODEL_PREDICTIONS, MODEL_FAILURES
 
 REGISTERED_MODEL_NAME = "paylater_twp90" 
 
@@ -41,26 +45,48 @@ CATEGORICAL_FEATURES = (
 # Define a global MlflowClient
 _client = MlflowClient()
 
+def _resolve_version(version: str | None = None) -> str:
+    """Pick Production first, then Staging, then newest."""
+    if version is not None:
+        return version
+    
+    all_versions = _client.search_model_versions(f"name='{REGISTERED_MODEL_NAME}'")
+    if not all_versions:
+        raise LookupError(f"No registered versions for {REGISTERED_MODEL_NAME}")
+
+    # Find the highest models version in systems
+    production = [v for v in all_versions if v.current_stage == "Production"]
+    staging = [v for v in all_versions if v.current_stage == "Staging"]
+    candidates = production or staging or all_versions
+    return max(candidates, key=lambda v: int(v.version)).version
+
 @lru_cache(maxsize=32)
-def load_model(task_name: str, version: str | None = None) -> Any:
+def load_model(version: str | None = None) -> Any:
+    v = _resolve_version(version)
     try:
-        if version is not None:
-            uri = f"models:/{task_name}/{version}"
-        else:
-            found = (
-                _client.search_model_versions(f"name='{task_name}' and current_stage='Production'")
-                or _client.search_model_versions(f"name='{task_name}' and current_stage='Staging'")
-            )
-
-            if not found:
-                raise LookupError(f"No deployed model version found for {task_name}")
-
-            uri = f"models:/{task_name}/{found[0].version}"
-
-        return mlflow.pyfunc.load_model(uri)
+        return mlflow.pyfunc.load_model(f"models:/{REGISTERED_MODEL_NAME}/{v}")
 
     except Exception as exc:
-        raise RuntimeError(f"Unable to load model {task_name}:{version}") from exc
+        raise RuntimeError(
+            f"Unable to load model {REGISTERED_MODEL_NAME}:{v} "
+            f"({type(exc).__name__}: {exc})"
+        ) from exc
+
+
+def _raw_catboost(model: Any):
+    """Return the underlying CatBoost classifier behind the pyfunc wrapper.
+
+    The mlflow.catboost wrapper only exposes ``predict`` (the hard class
+    label), so to obtain the default *probability* we need the raw estimator.
+    """
+    impl = getattr(model, "_model_impl", None)
+    if impl is not None and hasattr(impl, "cb_model"):
+        return impl.cb_model
+    raw = getattr(model, "get_raw_model", lambda: None)()
+    if raw is not None and hasattr(raw, "predict_proba"):
+        return raw
+    return None
+
 
 def _features(values: dict[str, Any]) -> pd.DataFrame:
     missing = [name for name in REQUIRED_FEATURES if name not in values]
@@ -68,28 +94,48 @@ def _features(values: dict[str, Any]) -> pd.DataFrame:
         raise ValueError(f"Missing required TWP90 features: {missing}")
 
     row = {name: values[name] for name in REQUIRED_FEATURES}
-
     for col in CATEGORICAL_FEATURES:
-        row[col] = str(row[col])
+        if not isinstance(row[col], str):
+            row[col] = str(row[col])
 
-    return pd.DataFrame([row], columns=list(REQUIRED_FEATURES))
+    frame = pd.DataFrame([row], columns=list(REQUIRED_FEATURES))
+    # CatBoost needs the categorical columns as real pandas category dtype,
+    # otherwise it silently returns the majority class (always 0).
+    for col in CATEGORICAL_FEATURES:
+        frame[col] = frame[col].astype("category")
+    return frame
 
-def predict_twp90(borrower_features: dict[str, Any], version: str | None = None) -> dict[str, Any]:
+
+def predict_twp90(
+    borrower_features: dict[str, Any], version: str | None = None
+) -> dict[str, Any]:
     """Predict TWP90 default probability for a borrower."""
-    model = load_model(REGISTERED_MODEL_NAME, version)
-    prediction = model.predict(_features(borrower_features))
-    value = float(prediction[0][0] if getattr(prediction, "ndim", 1) > 1 else prediction[0])
-    
+    v = _resolve_version(version)
+    model = load_model(v)
+    frame = _features(borrower_features)
+
+    cb = _raw_catboost(model)
+    try:
+        if cb is not None and hasattr(cb, "predict_proba"):
+            proba = cb.predict_proba(frame)
+            values = np.asarray(proba).reshape(-1)
+            # CatBoost orders columns by class index; P(default) is the last.
+            value = float(values[-1]) if values.size > 1 else float(values[0])
+        else:
+            prediction = model.predict(frame)
+            raw = prediction[0]
+            if hasattr(raw, "__len__") and not isinstance(raw, (str, bytes)):
+                value = float(raw[1]) if len(raw) > 1 else float(raw[0])
+            else:
+                value = float(raw)
+    except Exception:
+        MODEL_FAILURES.labels(task="twp90").inc()
+        raise
+
     if not 0 <= value <= 1:
-        raise ValueError("TWP90 model returned a probability outside [0, 1]")
+        MODEL_FAILURES.labels(task="twp90").inc()
+        raise ValueError(f"TWP90 model returned a probability outside [0, 1]: {value}")
 
-    # Return the version actually loaded
-    if version is None:
-        found = _client.search_model_versions(
-            f"name='{REGISTERED_MODEL_NAME}' and current_stage='Production'"
-        ) or _client.search_model_versions(
-            f"name='{REGISTERED_MODEL_NAME}' and current_stage='Staging'"
-        )
-        actual_version = found[0].version if found else None
+    MODEL_PREDICTIONS.labels(task="twp90").inc()
 
-    return {"default_probability": value, "model_version": actual_version}
+    return {"default_probability": value, "model_version": v}
