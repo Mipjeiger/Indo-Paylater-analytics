@@ -80,100 +80,179 @@ manifest, and the frontend package manifest:
 
 ## 🎯 Business and ML scope
 
-The source dataset is
-`database/dataset/indonesia_fintech_paylater.parquet`. The inspected dataset
-contains 10,000 rows and 30 columns, including:
+### Dataset contract
 
-- borrower demographics and employment attributes;
-- income and regional minimum wage information;
-- loan tenor, interest, credit-limit, and installment measures;
-- DTI, debt-service, utilization, and disposable-income indicators;
-- TWP90/default status;
-- root-cause labels; and
-- derived risk fields.
+The source file is
+[`paylater_engineering/database/dataset/indonesia_fintech_paylater.parquet`](paylater_engineering/database/dataset/indonesia_fintech_paylater.parquet).
+Inspection of that file found 10,000 rows, 30 columns, no null values, and
+10,000 distinct `borrower_id` values. It has no source timestamp column.
+`borrower_id` is the entity identifier and is the primary key in the
+PostgreSQL migration.
 
-The dataset has no source timestamp column and no missing values in the
-inspected file. `borrower_id` is unique in that dataset and is the natural
-entity key. Because there is no event timestamp in the source data, temporal
-model evaluation currently uses deterministic ordering where the training
-flow requires a temporal split. A true production temporal split requires an
-authoritative observation or event timestamp.
+The exact Parquet columns are grouped below by their current business use:
 
-The current model tasks are:
+- **Identifier:** `borrower_id`.
+- **Borrower profile:** `age`, `gender`, `province`, `education_level`,
+  `employment_status`.
+- **Income and lending:** `monthly_income_idr`,
+  `regional_minimum_wage_umr_idr`, `num_active_lending_apps`,
+  `total_loan_outstanding_idr`, `credit_limit_granted_idr`,
+  `loan_tenor_months`, `daily_interest_rate_pct`, `primary_loan_purpose`.
+- **Ratios and repayment measures:** `debt_to_income_ratio`,
+  `income_to_umr_ratio`, `credit_limit_utilization_ratio`,
+  `monthly_installment_estimate_idr`, `debt_service_ratio`,
+  `disposable_income_after_debt_idr`, `financial_distress_index`.
+- **Delinquency and labels:** `days_past_due`, `twp90_default_status`,
+  `primary_default_root_cause`.
+- **Derived risk and explanation fields:** `cot_financial_psychology_rationale`,
+  `confidence_score`, `risk_score`, `risk_short`, `is_high_risk`,
+  `distress_bin`.
 
-| Task | Model | Target/output | Important leakage controls |
+The inspected Pandas dtypes are: `int64` for `age`,
+`monthly_income_idr`, `regional_minimum_wage_umr_idr`,
+`num_active_lending_apps`, `total_loan_outstanding_idr`,
+`credit_limit_granted_idr`, `loan_tenor_months`, and `days_past_due`;
+`int8` for `risk_score`; `float64` for `daily_interest_rate_pct`,
+`debt_to_income_ratio`, `income_to_umr_ratio`,
+`credit_limit_utilization_ratio`, `monthly_installment_estimate_idr`,
+`debt_service_ratio`, `disposable_income_after_debt_idr`,
+`financial_distress_index`, and `confidence_score`; `category` for
+`twp90_default_status` and `risk_short`; `bool` for `is_high_risk`; and
+`object` for the remaining nine text columns.
+
+The observed `twp90_default_status` values are `Current-Performing`,
+`Default-Macet-TWP90`, `Doubtful-DPD61-90`, `Special-Mention-DPD1-30`, and
+`Substandard-DPD31-60`.
+
+### Data and feature flow
+
+The ETL reads the Parquet file and appends its rows in batches to
+`paylater.database` in PostgreSQL. The training flows read from PostgreSQL;
+the Parquet file is not the common runtime training source for all three tasks.
+The ETL uses append behavior rather than upsert, so rerunning it against an
+already populated table is not an idempotent refresh.
+
+Feast reads the PostgreSQL source and defines five borrower feature views:
+`borrower_profile`, `loan_behavior`, `dti_inputs`, `engineered_ratios`, and
+`twp90_signals`. Redis is the configured online store, with a one-hour key
+TTL. Feast's native Redis representation is serialized and is not intended
+for direct human-readable inspection. The separate readable-hash projection
+uses the `MIRROR_KEY_PREFIX` application setting; the Feast Compose service
+must receive that setting for the projection to use the intended key prefix.
+The projection is for inspection and is not Feast's online representation.
+
+### Implemented model tasks
+
+| Task | Training implementation | Target / API result | Current split and evaluation |
 |---|---|---|---|
-| TWP90 | CatBoost classifier | Binary default indicator derived from `twp90_default_status` | Excludes target, root cause, risk outputs, rationale, and `days_past_due` |
-| DTI/distress | TensorFlow/Keras multi-output regression | `debt_to_income_ratio`, `financial_distress_index` | Excludes both targets, `total_loan_outstanding_idr`, risk outputs, and delinquency fields |
-| Root cause | LightGBM multiclass classifier | `primary_default_root_cause` | Excludes the root-cause target, TWP90 target, risk outputs, and rationale |
+| TWP90 | CatBoost binary classifier | The training label is `0` only for `Current-Performing`; every other `twp90_default_status` value is mapped to `1`. The API returns `default_probability`. | 70% / 15% / 15%, sorted by the PostgreSQL `created_at` field; reports PR-AUC, recall at 95% precision, accuracy, and a validation-to-test PR-AUC gap. |
+| DTI and distress | TensorFlow/Keras multi-output regression | `debt_to_income_ratio` and `financial_distress_index`; the scoring API returns `dti` and `financial_distress_index`. | 80% / 20% after sorting by `borrower_id`; reports MSE, R², MAE, and MAPE overall and per target. |
+| Root cause | LightGBM, Random Forest, and Decision Tree candidates | `primary_default_root_cause`, with five labels: `Compulsive-FOMO-Spending`, `Gali-Lubang-Debt-Spiral`, `High-Interest-Rate-Compounding`, `Income-Shock-Underemployment`, and `Speculative-Losses`. The API returns `root_cause` and `confidence`. | 80% / 20%; reports balanced accuracy and quadratic weighted kappa. The flow ranks candidates by QWK but currently registers the LightGBM model for serving. |
 
-Model training flows upload artifacts to the configured MinIO/S3-compatible
-bucket. Temporary files are used only for model serialization during upload;
-the training flows do not intentionally maintain a persistent local model
-directory.
+The training feature preparation excludes each task's target and configured
+leakage fields. These are implementation-level controls, not evidence that
+the current dataset represents a production-time snapshot.
+
+### Model and API integration
+
+The three training flows track runs and register model versions in MLflow.
+Model artifacts are also uploaded to the configured MinIO bucket; the DTI
+flow stores its scaler there alongside the model. The API serving modules
+resolve a Production version first, then Staging, then the newest available
+version. The scoring/classification routes are `/score/twp90`,
+`/score/dti-distress/{borrower_id}`, and
+`/classify/root-cause/{borrower_id}`. The two `/score` routes persist
+successful predictions to `paylater.predictions`; the root-cause route
+currently does not use that prediction logger.
+
+### Data and evaluation limits
+
+PostgreSQL adds `created_at` and `updated_at` columns that are not in the
+Parquet source. The TWP90 flow orders rows by database `created_at`, but that
+field is not an authoritative borrower observation or event timestamp.
+Consequently, its current 70/15/15 split should not be described as a valid
+historical temporal evaluation. The DTI and root-cause splits are row-based,
+not time-based; the PostgreSQL root-cause load also has no explicit
+`ORDER BY`. In addition, the TWP90 target mapping treats every status other
+than `Current-Performing` as positive, including statuses besides
+`Default-Macet-TWP90`.
+Confirm that mapping against the intended business definition before
+interpreting its output as a 90-day-default probability. A production
+temporal evaluation requires a reliable observation timestamp and a
+business-approved target definition.
 
 ## 🏗️ Architecture
 
-```text
-                         +----------------------+
-                         | React/Vite frontend   |
-                         | app/frontend         |
-                         +----------+-----------+
-                                    |
-                                    | HTTP / JSON
-                                    v
-+-------------------+     +--------+---------+     +----------------------+
-| PostgreSQL 16     |<--->| FastAPI/Uvicorn  |<--->| MLflow tracking      |
-| data + registry   |     | app/api          |     | metadata + artifacts |
-+-------------------+     +--------+---------+     +----------+-----------+
-                                    |                         |
-                                    v                         v
-                         +----------+---------+     +---------+----------+
-                         | Model serving      |     | MinIO              |
-                         | app/serving        |     | S3-compatible store|
-                         +--------------------+     +--------------------+
+```mermaid
+flowchart LR
+    Browser --> Frontend["React SPA + Nginx<br/>Compose :8085"]
+    Frontend -->|"HTTP; Nginx proxies /api, /score, /classify, /health"| API
 
-       +------------------+       +--------------------+
-       | Feast             |<----->| Redis online store|
-       | offline/online   |       +--------------------+
-       +--------+---------+
-                |
-                v
-       +------------------+
-       | Prefect workflows|
-       | training flows  |
-       +------------------+
+    subgraph Runtime["Application runtime"]
+        API["FastAPI :8000<br/>API routers + model serving"]
+        Flows["Prefect flow functions<br/>app/training/flows"]
+    end
 
-       +------------------+       +------------------+
-       | Prometheus       |<------| FastAPI /metrics |
-       +--------+---------+       +------------------+
-                |
-                v
-       +------------------+
-       | Grafana          |
-       +------------------+
+    subgraph Persistence["Data and artifact services"]
+        PostgreSQL["PostgreSQL :5432<br/>PayLater data + MLflow backend"]
+        Redis["Redis DB 0 :6379<br/>Feast online store"]
+        MinIO["MinIO :9000<br/>S3-compatible artifacts"]
+        MLflow["MLflow :5000<br/>tracking + model registry"]
+    end
+
+    API -->|"TWP90/DTI prediction records"| PostgreSQL
+    API -->|"resolve and load registered models"| MLflow
+    API -->|"load DTI scaler"| MinIO
+
+    Flows -->|"read training data"| PostgreSQL
+    Flows -->|"track runs and register models"| MLflow
+    Flows -->|"upload artifacts"| MinIO
+    Flows <-->|"flow API and state"| Prefect["Prefect server :4200"]
+    MLflow -->|"tracking backend"| PostgreSQL
+    MLflow -->|"model artifacts"| MinIO
+
+    PostgreSQL -->|"offline source"| Feast["Feast :6566<br/>apply + serve + materialize + refresh"]
+    Feast -->|"online features + readable projection (prefix configured separately)"| Redis
+    RedisInsight["RedisInsight :8081"] -->|"inspect"| Redis
+
+    Prometheus["Prometheus :9090"] -->|"scrape /metrics"| API
+    Grafana["Grafana :3000"] -->|"query metrics"| Prometheus
 ```
+
+In Compose, model serving is part of the FastAPI container, not a separate
+service. Training flows read PostgreSQL and connect to MLflow and MinIO; they
+do not receive training data from Feast. Feast independently reads the
+PostgreSQL offline source and materializes to Redis. The current scoring routes
+accept feature values in their API requests and load registered models through
+MLflow; they do not currently use Feast retrieval for request features.
+
+The Prefect server provides the orchestration API. Compose does not define a
+Prefect worker or scheduled deployment for these training flows, so starting
+the server alone does not start model training. The frontend image serves the
+React build with Nginx, which proxies API and scoring paths to FastAPI.
+Prometheus scrapes FastAPI's metrics endpoint, and Grafana queries Prometheus.
 
 ### 🔌 Service responsibilities
 
 | Service | Compose port | Responsibility |
 |---|---:|---|
-| PostgreSQL | `5432` | Source data, model metadata, predictions, actions, and drift reports |
-| Redis | `6379` | Cache and Feast online-store backend |
+| PostgreSQL | `5432` | PayLater source and operational tables; MLflow tracking backend |
+| Redis | `6379` | Feast online-store backend and readable inspection projection (configure `MIRROR_KEY_PREFIX`) |
 | RedisInsight | `8081` | Local Redis inspection UI |
-| Feast | `6566` | Online retrieval and supervised readable-projection refresh |
+| Feast | `6566` (`8888` mapped for optional UI) | Feature registry, online serving, materialization, and readable projection refresh |
 | MinIO API | `9000` | S3-compatible model/artifact storage |
 | MinIO Console | `9001` | Local object-storage UI |
-| FastAPI | `8000` | Health, metrics, scoring, and classification HTTP boundary |
-| MLflow | `5000` | Experiment tracking, model metadata, and artifact serving |
-| Prefect | `4200` | Workflow orchestration server |
-| Prometheus | `9090` | Pull-based metrics collection |
-| Grafana | `3000` | Metrics visualization |
-| Frontend dev server | `5173` | Vite React application when run locally |
+| FastAPI | `8000` | HTTP API, model inference, prediction logging, and `/metrics` |
+| MLflow | `5002` (container `5000`) | Experiment tracking and model registry |
+| Prefect | `4200` | Workflow orchestration API; no worker/deployment is defined in Compose |
+| Prometheus | `9090` | Pull-based metrics collection from FastAPI |
+| Grafana | `3000` | Metrics visualization using Prometheus |
+| Frontend | `8085` (`5173` for local Vite development) | React SPA served by Nginx; proxies API requests to FastAPI |
 
 All Compose services use the `paylater_indodana` bridge network. Persistent
-state is stored in named volumes: `pgdata`, `minio_data`, `mlflow_data`,
-`prefect_data`, `prometheus_data`, and `grafana_data`.
+state is stored in named volumes: `pgdata`, `redis_data`,
+`redisinsight_data`, `minio_data`, `mlflow_data`, `prefect_data`,
+`prometheus_data`, and `grafana_data`.
 
 ## 🗂️ Repository layout
 
