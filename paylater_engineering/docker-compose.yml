@@ -114,25 +114,18 @@ services:
       SLACK_NOTIFY_ON_API_HIT: ${SLACK_NOTIFY_ON_API_HIT}
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
       ADMIN_DEV_ENDPOINTS: "1"
+      ACTION_RULES_JSON: ${ACTION_RULES_JSON}
     ports:
       - "8000:8000"
     volumes:
       - .:/workspace
     working_dir: /workspace
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
     depends_on:
       - postgres
       - redis
       - redis-ui
     networks:
       - paylater_indodana
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   feast:
     build:
@@ -252,7 +245,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Frontend ──────────────────────────────────────────────────────────────
   frontend:
     build:
       context: .
