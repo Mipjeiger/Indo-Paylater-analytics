@@ -140,6 +140,9 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}
       REDIS_URL: redis://redis:6379/0
+      FEAST_SERVER_HOST: 127.0.0.1
+      FEAST_SERVER_PORT: 6566
+      FEAST_SERVER_BIND_HOST: 0.0.0.0
     ports:
       - "6566:6566"
       - "8888:8888"
@@ -147,12 +150,15 @@ services:
       - .:/workspace
       - ./app/feast/data:/workspace/app/feast/data
     working_dir: /workspace
-    command: ["feast", "-c", "app/feast", "serve", "--host", "0.0.0.0", "--port", "6566"]
+    command: ["python", "-m", "app.feast.redis_insight_mirror", "--serve"]
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - paylater_indodana
+    restart: unless-stopped
 
   mlflow:
     image: ghcr.io/mlflow/mlflow:v3.17.0-full
