@@ -161,6 +161,7 @@ directory.
 | PostgreSQL | `5432` | Source data, model metadata, predictions, actions, and drift reports |
 | Redis | `6379` | Cache and Feast online-store backend |
 | RedisInsight | `8081` | Local Redis inspection UI |
+| Feast | `6566` | Online retrieval and supervised readable-projection refresh |
 | MinIO API | `9000` | S3-compatible model/artifact storage |
 | MinIO Console | `9001` | Local object-storage UI |
 | FastAPI | `8000` | Health, metrics, scoring, and classification HTTP boundary |
@@ -369,192 +370,65 @@ The ETL requires PostgreSQL connectivity and the configured dataset path. Check
 the ETL output and database row counts before training. Do not rerun an ETL
 against a shared environment without confirming its append/upsert behavior.
 
-### 5. 🧩 Build and start Feast
+### 5. 🧩 Start Feast and readable Redis projection
 
-Feast is built from
-[`docker/feast.Dockerfile`](paylater_engineering/docker/feast.Dockerfile).
-The image installs Feast `0.41.0`, copies the project into `/app`, and uses
-the PostgreSQL-backed source and Redis online store defined in
-`app/feast/feature_store.yaml`.
+The single Feast container applies the definitions in `app/feast`, starts the
+Feast server, and supervises the readable-projection refresh loop. It
+materializes the complete current PostgreSQL source and writes every borrower's
+online features to readable Redis hashes in bounded batches.
 
-The Feast image is currently standalone and is not a service in
-`docker-compose.yml`. Build it from the `paylater_engineering` directory so
-the Dockerfile's `COPY . /app` includes the full project:
+Run this after the ETL has loaded `paylater.database`:
 
 ```bash
-docker build \
-  --file docker/feast.Dockerfile \
-  --tag paylater-feast:0.41.0 \
-  .
+docker compose up -d --build postgres redis feast
+docker compose ps postgres redis feast
+docker compose logs --tail=100 feast
 ```
 
-Apply entity, source, and feature-view definitions before starting the service.
-The command below creates or updates the local Feast registry:
+The refresh loop updates the projection every 40 minutes. Both Feast's native
+online keys and readable hashes use a one-hour TTL. The Redis configuration
+rewrites unchanged source rows during each full refresh so their TTLs renew.
+PostgreSQL remains the source of truth; Redis can be rebuilt from it.
+
+Feast's native keys use a binary encoding and may look like replacement
+symbols in RedisInsight. Do not edit or rename them. The readable projection
+uses separate keys in the same Redis database (DB 0), so it does not interfere
+with Feast retrieval:
+
+```text
+paylater_indodana:borrower:<borrower_id>
+```
+
+Verify that all borrower hashes are present and have a live TTL:
 
 ```bash
-docker run --rm \
-  --network paylater_indodana \
-  --env POSTGRES_HOST=postgres \
-  --env POSTGRES_PORT=5432 \
-  --env POSTGRES_DB="$POSTGRES_DB" \
-  --env POSTGRES_USER="$POSTGRES_USER" \
-  --env POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
-  --env REDIS_URL=redis://redis:6379/0 \
-  paylater-feast:0.41.0 \
-  sh -c 'cd app/feast && feast apply'
+docker compose exec redis sh -c \
+  'redis-cli --scan --pattern "paylater_indodana:borrower:*" | wc -l'
+docker compose exec redis sh -c \
+  'key=$(redis-cli --scan --pattern "paylater_indodana:borrower:*" | head -n 1); redis-cli TTL "$key"'
+docker compose exec redis redis-cli HGETALL \
+  paylater_indodana:borrower:ID_DEB_00264B68D1
 ```
 
-Start Feast on port `6566` and attach it to the same Compose network so it can
-resolve the `postgres` and `redis` service names:
+The first command should match the row count in `paylater.database`; the TTL
+should be positive and no greater than 3600 seconds. In RedisInsight, connect
+to host `redis`, port `6379`, and database index `0`, then search for
+`paylater_indodana:borrower:*`. The readable hash fields are feature-view
+qualified, for example `borrower_profile__gender`.
+
+If Feast exits or no hashes appear, inspect its logs and confirm
+that PostgreSQL contains borrower rows:
 
 ```bash
-docker run --rm \
-  --name paylater-feast \
-  --network paylater_indodana \
-  --publish 6566:6566 \
-  --env POSTGRES_HOST=postgres \
-  --env POSTGRES_PORT=5432 \
-  --env POSTGRES_DB="$POSTGRES_DB" \
-  --env POSTGRES_USER="$POSTGRES_USER" \
-  --env POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
-  --env REDIS_URL=redis://redis:6379/0 \
-  paylater-feast:0.41.0
+docker compose logs --tail=200 feast
+docker compose exec postgres sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT COUNT(*) FROM paylater.database"'
 ```
 
-In another terminal, verify the Feast process:
-
-```bash
-docker logs --follow paylater-feast
-```
-
-`feast apply` does not populate Redis. It registers the entity and feature-view
-metadata only. Materialize the PostgreSQL source into the Feast Redis online
-store after the source table contains data. The online-store configuration sets
-`key_ttl_seconds: 3600`, so each materialized Feast feature key expires one hour
-after it is written:
-
-```bash
-END_TS=$(docker exec feast date -u +%Y-%m-%dT%H:%M:%S)
-docker exec feast sh -c \
-  "cd app/feast && feast materialize-incremental ${END_TS}"
-```
-
-If the one-hour TTL was added or changed after keys were already materialized,
-run materialization again so Feast rewrites those keys with the new expiration:
-
-```bash
-END_TS=$(docker exec feast date -u +%Y-%m-%dT%H:%M:%S)
-docker exec feast sh -c \
-  "cd app/feast && feast materialize-incremental ${END_TS}"
-```
-
-This expires Feast feature keys, not the Redis database itself. RedisInsight
-configuration data is stored separately in the `redisinsight_data` volume.
-
-#### Restore redis keys after the one-hour expiration
-
-When the Feast keys have expired, restore them from PostgreSQL with a full
-materialization. Do not rely only on `materialize-incremental`: its start time
-can be after the historical rows that need to be restored.
-
-1. Confirm that the PostgreSQL source still contains data:
-
-   ```bash
-   docker exec postgres sh -c \
-     'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT COUNT(*) FROM paylater.database"'
-   ```
-
-2. Apply the current Feast definitions:
-
-   ```bash
-   docker exec feast sh -c 'cd app/feast && feast apply'
-   ```
-
-3. Materialize the complete source history through the current UTC time:
-
-   ```bash
-   END_TS=$(docker exec feast date -u +%Y-%m-%dT%H:%M:%S)
-   docker exec feast sh -c \
-     "cd app/feast && feast materialize 1970-01-01T00:00:00 ${END_TS}"
-   ```
-
-4. Verify that keys have returned and have the one-hour TTL:
-
-   ```bash
-   docker exec redis redis-cli DBSIZE
-   docker exec feast sh -c \
-     'python -c "import redis; c=redis.Redis(host=\"redis\", port=6379); k=next(c.scan_iter(), None); print(c.ttl(k) if k else \"no keys\")"'
-   ```
-
-The last command should report a value close to `3600`. Repeat the full
-materialization only when the keys have expired or a historical rebuild is
-required. Use incremental materialization for normal new data.
-
-For a reproducible time window, use explicit UTC timestamps instead:
-
-```bash
-docker exec feast sh -c \
-  'cd app/feast && feast materialize 2020-01-01T00:00:00 2030-01-01T00:00:00'
-```
-
-Verify that Feast has materialized feature keys:
-
-```bash
-docker exec redis redis-cli DBSIZE
-docker exec redis redis-cli --scan | head
-```
-
-The exact Redis key names are generated by Feast and should not be assumed by
-application code. A zero key count means that `feast apply` was run without a
-successful materialization, the source query returned no rows, or the source
-timestamp window excluded the data.
-
-Open RedisInsight at <http://localhost:8081> and create a database connection
-manually:
-
-| RedisInsight field | Local Docker value |
-|---|---|
-| Name | `PayLater Indodana` |
-| Host | `redis` when RedisInsight runs in Compose; `localhost` only for a host-native client |
-| Port | `6379` |
-| Username | empty unless Redis authentication is enabled |
-| Password | empty unless Redis authentication is enabled |
-| Database index | `0` |
-
-RedisInsight does not automatically discover the `redis` Compose service.
-When using the RedisInsight container, `redis` is the correct hostname because
-both containers share the `paylater_indodana` Docker network. Do not use
-`localhost` inside RedisInsight: that refers to the RedisInsight container
-itself, not the Redis container.
-
-The default `provider: local` registry is stored at
-`app/feast/data/registry.db` inside the container. For local development,
-persist it by mounting a host directory and rerun `feast apply`:
-
-```bash
-mkdir -p .feast-data
-docker run --rm \
-  --network paylater_indodana \
-  --volume "$PWD/.feast-data:/app/app/feast/data" \
-  --env POSTGRES_HOST=postgres \
-  --env POSTGRES_PORT=5432 \
-  --env POSTGRES_DB="$POSTGRES_DB" \
-  --env POSTGRES_USER="$POSTGRES_USER" \
-  --env POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
-  --env REDIS_URL=redis://redis:6379/0 \
-  paylater-feast:0.41.0 \
-  sh -c 'cd app/feast && feast apply'
-```
-
-Apply feast for materialize feature store data
-```bash
-docker exec -it feast sh -c "cd app/feast && feast apply”
-```
-
-To access Feast UI use this docker code definitely
-```bash
-docker exec -it feast sh -c "cd app/feast && feast ui --port 8888”
-```
+The projection contains a readable duplicate of borrower feature data and is
+for local development/inspection, not production Redis. Because Feast serving
+and refresh share one container, stopping the projection also stops Feast:
+`docker compose stop feast`.
 
 Do not expose Feast directly to the browser. The API and model-serving
 components remain the controlled boundary for feature retrieval.

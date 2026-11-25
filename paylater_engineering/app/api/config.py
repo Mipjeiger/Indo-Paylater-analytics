@@ -57,6 +57,11 @@ class Settings():
 
     # ── Feast ──
     #FEAST_REPO_PATH = Path("feature_store")
+    MIRROR_KEY_PREFIX = os.getenv("MIRROR_KEY_PREFIX")
+    FEAST_SERVER_HOST = os.getenv("FEAST_SERVER_HOST")
+    FEAST_SERVER_BIND_HOST = os.getenv("FEAST_SERVER_BIND_HOST")
+    FEAST_SERVER_PORT = int(os.getenv("FEAST_SERVER_PORT"))
+    FEAST_SERVER_HOST_TCP = os.getenv("FEAST_SERVER_HOST_TCP")
 
     # ── Slack ──
     SLACK_WEBHOOK_URL: str = os.getenv("SLACK_WEBHOOK_URL")
