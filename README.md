@@ -184,6 +184,7 @@ business-approved target definition.
 ## 🏗️ Architecture
 
 ```text
+Phase 1.
 CLIENT REQUEST AND INFERENCE
 
 [Browser]
@@ -201,7 +202,7 @@ CLIENT REQUEST AND INFERENCE
               v                           v                          v
    [PostgreSQL :5432]          [MLflow :5000]               [MinIO :9000]
 
-
+Phase 2.
 MODEL TRAINING AND REGISTRATION
 
 [Explicit flow invocation in FastAPI container]
@@ -227,7 +228,7 @@ MODEL TRAINING AND REGISTRATION
           v
     [PostgreSQL :5432]
 
-
+Phase 3.
 OFFLINE AND ONLINE FEATURES
 
 [PostgreSQL :5432] -- offline source --> [Feast :6566]
@@ -240,7 +241,7 @@ OFFLINE AND ONLINE FEATURES
                                               | inspect
                                       [RedisInsight :8081]
 
-
+Phase 4.
 MONITORING
 
 [FastAPI :8000] -- exposes /metrics --> [Prometheus :9090]
