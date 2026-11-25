@@ -183,40 +183,70 @@ business-approved target definition.
 
 ## 🏗️ Architecture
 
-```mermaid
-flowchart LR
-    Browser --> Frontend["React SPA + Nginx<br/>Compose :8085"]
-    Frontend -->|"HTTP; Nginx proxies /api, /score, /classify, /health"| API
+```text
+CLIENT REQUEST AND INFERENCE
 
-    subgraph Runtime["Application runtime"]
-        API["FastAPI :8000<br/>API routers + model serving"]
-        Flows["Prefect flow functions<br/>app/training/flows"]
-    end
+[Browser]
+    |
+    | HTTP
+    v
+[React SPA + Nginx :8085] -- proxy /api, /score, /classify, /health -->
+                                  [FastAPI :8000; API + model serving]
+                                          |
+              +---------------------------+--------------------------+
+              |                           |                          |
+              v                           v                          v
+   log TWP90/DTI predictions   resolve/load model version    load DTI scaler
+              |                           |                          |
+              v                           v                          v
+   [PostgreSQL :5432]          [MLflow :5000]               [MinIO :9000]
 
-    subgraph Persistence["Data and artifact services"]
-        PostgreSQL["PostgreSQL :5432<br/>PayLater data + MLflow backend"]
-        Redis["Redis DB 0 :6379<br/>Feast online store"]
-        MinIO["MinIO :9000<br/>S3-compatible artifacts"]
-        MLflow["MLflow :5000<br/>tracking + model registry"]
-    end
 
-    API -->|"TWP90/DTI prediction records"| PostgreSQL
-    API -->|"resolve and load registered models"| MLflow
-    API -->|"load DTI scaler"| MinIO
+MODEL TRAINING AND REGISTRATION
 
-    Flows -->|"read training data"| PostgreSQL
-    Flows -->|"track runs and register models"| MLflow
-    Flows -->|"upload artifacts"| MinIO
-    Flows <-->|"flow API and state"| Prefect["Prefect server :4200"]
-    MLflow -->|"tracking backend"| PostgreSQL
-    MLflow -->|"model artifacts"| MinIO
+[Explicit flow invocation in FastAPI container]
+                    |
+                    v
+[Prefect flow: app/training/flows] -- reports run state --> [Prefect server :4200]
+                    |
+                    | reads training data
+                    v
+             [PostgreSQL :5432]
+                    |
+                    | rows used by the training tasks
+                    v
+       [Train and evaluate model]
+                    |
+          +---------+----------+
+          |                    |
+          | log run/register   | upload model/scaler artifacts
+          v                    v
+    [MLflow :5000] -- artifact store --> [MinIO :9000]
+          |
+          | tracking metadata
+          v
+    [PostgreSQL :5432]
 
-    PostgreSQL -->|"offline source"| Feast["Feast :6566<br/>apply + serve + materialize + refresh"]
-    Feast -->|"online features + readable projection (prefix configured separately)"| Redis
-    RedisInsight["RedisInsight :8081"] -->|"inspect"| Redis
 
-    Prometheus["Prometheus :9090"] -->|"scrape /metrics"| API
-    Grafana["Grafana :3000"] -->|"query metrics"| Prometheus
+OFFLINE AND ONLINE FEATURES
+
+[PostgreSQL :5432] -- offline source --> [Feast :6566]
+                                              |
+                                              | materialize online features
+                                              | and refresh readable projection
+                                              v
+                                      [Redis DB 0 :6379]
+                                              ^
+                                              | inspect
+                                      [RedisInsight :8081]
+
+
+MONITORING
+
+[FastAPI :8000] -- exposes /metrics --> [Prometheus :9090]
+                                               ^
+                                               | queries metrics
+                                        [Grafana :3000]
 ```
 
 In Compose, model serving is part of the FastAPI container, not a separate
