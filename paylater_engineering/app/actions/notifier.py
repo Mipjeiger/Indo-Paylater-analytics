@@ -42,13 +42,13 @@ def send_notification(channel: str, message: str, *, timeout: float = 5.0) -> di
     # Call slack response
     try:
         response = requests.post(
-            webhook,
+            webhook,  
             json={"text": message},
             timeout=timeout,
         )
         response.raise_for_status()
     except requests.RequestException as e:
-        logger.exception("⚠️ Notification delivery failed", extra={"channel": channel})
+        logger.warning("⚠️ Notification delivery failed: %s", e, extra={"channel": channel})
         ACTION_OUTCOMES.labels(action="notify_slack", status="failed").inc()
 
         return {

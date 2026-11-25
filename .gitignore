@@ -10,3 +10,5 @@ paylater_engineering/app/serving/tests/features_body.md
 **mlflow.db
 paylater_engineering/catboost_info
 **.venv
+.vscode
+.vscode/settings.json

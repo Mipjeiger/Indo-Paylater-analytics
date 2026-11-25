@@ -10,7 +10,6 @@ from app.serving.prediction_logger import PredictionLogger
 
 router = APIRouter()
 
-
 @router.post("/twp90", response_model=TWP90Response)
 def score_twp90(request: TWP90Request, background_tasks: BackgroundTasks):
     from app.api.deps import get_db
@@ -59,7 +58,11 @@ def score_twp90(request: TWP90Request, background_tasks: BackgroundTasks):
     return {"borrower_id": request.borrower_id, **result}
 
 
-@router.get("/dti-distress/{borrower_id}", response_model=DTIResponse)
+@router.api_route(
+    "/dti-distress/{borrower_id}",
+    methods=["GET", "POST"],
+    response_model=DTIResponse,
+)
 def score_dti_distress(
     borrower_id: str,
     features: dict[str, object],

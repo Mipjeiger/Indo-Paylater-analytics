@@ -73,9 +73,22 @@ def _raw_keras(model: Any):
     impl = getattr(model, "_model_impl", None)
     if impl is not None and hasattr(impl, "keras_model"):
         return impl.keras_model
+    if impl is not None and hasattr(impl, "model"):
+        return impl.model
+    if impl is not None and hasattr(impl, "predict"):
+        return impl
     raw = getattr(model, "get_raw_model", lambda: None)()
     if raw is not None and hasattr(raw, "predict"):
         return raw
+    if hasattr(model, "unwrap_python_model"):
+        try:
+            unwrapped = model.unwrap_python_model()
+            if hasattr(unwrapped, "keras_model"):
+                return unwrapped.keras_model
+            if hasattr(unwrapped, "predict"):
+                return unwrapped
+        except Exception:
+            pass
     return None
 
 
@@ -100,8 +113,7 @@ def _build_frame(
     features: dict[str, Any], expected: tuple[str, ...], version: str
 ) -> pd.DataFrame:
     """Build a single-row DataFrame from the provided feature values, scaled
-    with the training-time StandardScaler and re-typed to match the model's
-    pyfunc schema (integer columns stay integer)."""
+    with the training-time StandardScaler."""
     missing = [name for name in expected if name not in features]
     if missing:
         raise ValueError(
@@ -116,33 +128,7 @@ def _build_frame(
     # Apply the same StandardScaler that was fit during training.
     scaler = load_scaler(version)
     x_scaled = scaler.transform(frame).astype("float32")
-
-    # The Keras model was trained on a plain float32 matrix, but the pyfunc
-    # schema enforces column names + dtypes from training. Rebuild a DataFrame
-    # that satisfies the schema: integer columns stay integer.
-    model = load_model(version)
-    schema = None
-    meta = getattr(model, "metadata", None)
-    if meta is not None:
-        try:
-            schema = meta.get_input_schema()
-        except Exception:
-            schema = None
-
-    col_types: dict[str, str] = {}
-    if schema is not None:
-        inputs = getattr(schema, "_inputs", None) or getattr(schema, "inputs", [])
-        for col in inputs:
-            col_name = getattr(col, "name", None)
-            col_type = getattr(col, "type", None)
-            if col_name and col_type:
-                col_types[col_name] = str(col_type)
-
-    out = pd.DataFrame(x_scaled, columns=list(expected))
-    for col, dtype in col_types.items():
-        if "int" in dtype.lower():
-            out[col] = out[col].astype("int64")
-    return out
+    return pd.DataFrame(x_scaled, columns=list(expected))
 
 
 @lru_cache(maxsize=8)
@@ -188,13 +174,35 @@ def predict_dti_distress(
     v = _resolve_version(version)
     model = load_model(v)
 
-    # Build the row in the exact order the model was trained on, scaled and
-    # re-typed so the pyfunc schema enforcement passes.
-    frame = _build_frame(features, expected, v)
+    missing = [name for name in expected if name not in features]
+    if missing:
+        raise ValueError(
+            f"Missing required DTI features (expected {len(expected)}): {missing}"
+        )
 
-    # --- Wrap the actual model call
+    raw_frame = pd.DataFrame(
+        [{k: features[k] for k in expected}],
+        columns=list(expected),
+    )
+
+    scaler = load_scaler(v)
+    x_scaled = scaler.transform(raw_frame).astype("float32")
+
+    # Predict using the raw Keras model or un-validated model implementation
+    # to avoid pyfunc schema casting errors (which fail when continuous scaled float32
+    # values are validated against pre-scaled integer schema columns like age/num_active_lending_apps).
+    keras_model = _raw_keras(model)
     try:
-        prediction = model.predict(frame)
+        if keras_model is not None and hasattr(keras_model, "predict"):
+            try:
+                prediction = keras_model.predict(x_scaled, verbose=0)
+            except (TypeError, ValueError):
+                prediction = keras_model.predict(x_scaled)
+        elif hasattr(model, "_model_impl") and hasattr(model._model_impl, "predict"):
+            prediction = model._model_impl.predict(x_scaled)
+        else:
+            frame = pd.DataFrame(x_scaled, columns=list(expected))
+            prediction = model.predict(frame)
     except Exception:
         MODEL_FAILURES.labels(task="dti_distress").inc()
         raise
