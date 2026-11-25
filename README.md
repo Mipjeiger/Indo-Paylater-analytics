@@ -185,22 +185,13 @@ business-approved target definition.
 
 ```text
 Phase 1.
-CLIENT REQUEST AND INFERENCE
+API AND MODEL INFERENCE
 
-[Browser]
-    |
-    | HTTP
-    v
-[React SPA + Nginx :8085] -- proxy /api, /score, /classify, /health -->
-                                  [FastAPI :8000; API + model serving]
-                                          |
-              +---------------------------+--------------------------+
-              |                           |                          |
-              v                           v                          v
-   log TWP90/DTI predictions   resolve/load model version    load DTI scaler
-              |                           |                          |
-              v                           v                          v
-   [PostgreSQL :5432]          [MLflow :5000]               [MinIO :9000]
+[FastAPI :8000; API + model serving]
+      |                          |                          |
+      | log TWP90/DTI results    | resolve/load version     | load DTI scaler
+      v                          v                          v
+[PostgreSQL :5432]          [MLflow :5000]              [MinIO :9000]
 
 Phase 2.
 MODEL TRAINING AND REGISTRATION
@@ -248,6 +239,19 @@ MONITORING
                                                ^
                                                | queries metrics
                                         [Grafana :3000]
+
+Phase 5.
+FRONTEND AND WEBSERVER INTEGRATION
+
+[Browser] -- GET page/assets --> [Nginx frontend :8085] -- serves --> [React bundle]
+
+[React app running in browser] -- same-origin API request --> [Nginx :8085]
+                                                               |
+                                                               | reverse proxy
+                                                               v
+                                                        [FastAPI :8000]
+
+[Local Vite dev server :5173] -- VITE_API_BASE_URL=http://localhost:8000 --> [FastAPI :8000]
 ```
 
 In Compose, model serving is part of the FastAPI container, not a separate
@@ -284,6 +288,100 @@ All Compose services use the `paylater_indodana` bridge network. Persistent
 state is stored in named volumes: `pgdata`, `redis_data`,
 `redisinsight_data`, `minio_data`, `mlflow_data`, `prefect_data`,
 `prometheus_data`, and `grafana_data`.
+
+## Webserver engineers
+
+Phase 5 is the frontend and web-server integration boundary. The React
+application runs in the user's browser; in the Compose deployment, Nginx serves
+the Vite-built static files on port `8085` and reverse-proxies supported API
+paths to FastAPI on port `8000`. In local development, Vite serves the app on
+port `5173`, and `VITE_API_BASE_URL` points the browser directly to
+`http://localhost:8000`.
+
+### What to do in the frontend
+
+1. **Build the screen around a real contract.** Routes are declared in
+   [router.tsx](paylater_engineering/app/frontend/src/app/router.tsx). Keep
+   page components focused on the user workflow. The current browser paths are `/`,
+   `/borrowers`, `/risk`, `/decisions`, `/portfolio`, `/models`, `/monitoring`,
+   and `/audit`. Add a route there for each new page, then use the registered
+   FastAPI endpoints:
+
+   - Read views: `GET /api/v1/dashboard/kpis`,
+     `/api/v1/borrowers`, `/api/v1/decisions`,
+     `/api/v1/portfolio/summary`, `/api/v1/portfolio/{borrower_id}`,
+     `/api/v1/models`, and `/api/v1/audit/events`.
+   - Risk actions: `POST /score/twp90`,
+     `GET /score/dti-distress/{borrower_id}`, and
+     `POST /classify/root-cause/{borrower_id}`.
+   - Service status: `GET /health/` and `GET /metrics/`.
+
+2. **Keep API calls out of page components.** Add or reuse a function in
+   [`app/frontend/src/services/`](paylater_engineering/app/frontend/src/services/),
+   call it through [api-client.ts](paylater_engineering/app/frontend/src/services/api-client.ts),
+   and define request/response shapes in
+   [types/api.ts](paylater_engineering/app/frontend/src/types/api.ts). Use the shared
+   React Query provider for server state, and render loading, error, empty, and
+   success states instead of substituting sample data for API responses.
+
+3. **Match the model request contract before enabling scoring.** The current
+   [RiskPage](paylater_engineering/app/frontend/src/pages/RiskPage.tsx) sends only four numeric fields, but TWP90 inference requires a
+   larger feature set, and the DTI/root-cause models use their registered
+   feature contracts. The [risk-service.ts](paylater_engineering/app/frontend/src/services/risk-service.ts)
+   DTI function also encodes features in a
+   query string, so verify that request format against the FastAPI contract.
+   Supply the complete, validated feature vector or agree on a backend
+   borrower-lookup contract; do not fill missing model inputs with invented
+   values.
+
+4. **Use the right API base URL for each run mode.** For local Vite
+   development, set `VITE_API_BASE_URL=http://localhost:8000` in
+   `app/frontend/.env.local`, then run:
+
+   ```bash
+   cd paylater_engineering/app/frontend
+   npm ci
+   npm run build
+   npm run dev
+   ```
+
+   Open <http://localhost:5173>. For Compose, keep the frontend build's
+   `VITE_API_BASE_URL` empty so browser requests are same-origin; Nginx
+   forwards `/api/`, `/score/`, `/classify/`, `/health`, and `/metrics` to
+   `fastapi:8000`. If local Vite uses a different origin or port, add it to
+   FastAPI's `FRONTEND_ORIGINS`; the Compose and default settings already
+   include the usual local Vite origins.
+
+5. **Verify the web-to-API path.** After configuring `.env`, loading the
+   database, and ensuring any required model versions are registered, start
+   the production frontend and API with the model services:
+
+   ```bash
+   cd paylater_engineering
+   docker compose up -d --build postgres redis minio mlflow fastapi frontend
+   curl --fail http://localhost:8085/health/
+   curl --fail 'http://localhost:8085/api/v1/borrowers?limit=5'
+   ```
+
+   Open <http://localhost:8085>, visit the page, and check the browser's
+   Network panel and the `frontend`/`fastapi` container logs if a request
+   fails. A working static page alone does not verify the API or model
+   integration.
+
+### What Nginx is responsible for
+
+The config in
+[nginx.frontend.conf](paylater_engineering/docker/nginx.frontend.conf) serves
+the static React bundle, falls back to `index.html` for client-side routes, and
+proxies the listed API paths to FastAPI. When adding a new API path family,
+confirm it is covered by a proxy location and that the FastAPI route is
+registered. Do not connect browser code directly to PostgreSQL, Redis, Feast,
+MLflow, or MinIO, and never put service credentials in Vite environment
+variables because those values are included in the browser bundle.
+
+The role selector and permission filtering are client-side UI behavior only.
+They are not authentication or authorization; enforce access to sensitive
+operations in the backend before production use.
 
 ## 🗂️ Repository layout
 
@@ -695,21 +793,23 @@ the `paylater-api` target is up before relying on dashboard values.
 
 ### 11. 🖥️ Start the frontend
 
-Configure the frontend API base URL through the local frontend environment:
+For local Vite development, set the API base URL and start the frontend:
 
 ```bash
 cd app/frontend
-printf '%s\n' 'VITE_API_BASE_URL=http://localhost:8000' > .env.local
-npm install
-npm run dev
+npm ci
+VITE_API_BASE_URL=http://localhost:8000 npm run dev
 ```
 
 Open <http://localhost:5173>.
 
-The frontend uses the registered FastAPI health, metrics, TWP90, DTI/distress,
-and root-cause routes. Pages whose aggregation APIs are not registered display
-an explicit unavailable state instead of fabricated borrower, portfolio,
-model, or audit data.
+The frontend uses FastAPI health and metrics routes, registered `/api/v1`
+read-only aggregation routes, and the risk-scoring routes. The current Risk
+page form submits only four numeric fields, which is not the full feature
+contract required by the models; review the “Webserver engineers” section
+before relying on its inference actions. When API data is unavailable, pages
+should show an explicit error or unavailable state rather than fabricated
+borrower, portfolio, model, or audit data.
 
 ### 12. 🛑 Stop services
 
@@ -1109,10 +1209,11 @@ ready:
 1. **Migration review:** run and test the idempotent migration against a clean
    PostgreSQL volume before treating database initialization as production
    ready.
-2. **API aggregation contract:** frontend pages for borrower directories,
-   decisions, portfolio analytics, model governance, and audit require
-   registered FastAPI endpoints. The frontend intentionally shows an
-   unavailable state until those APIs exist.
+2. **Frontend/API contracts:** the read-only `/api/v1` aggregation routes are
+   registered, but their UI depends on the corresponding database data being
+   present. The Risk page still needs the complete model feature inputs and an
+   aligned DTI request format before its inference actions are fully
+   integrated.
 3. **Authentication and authorization:** the frontend permission model is not
    a security boundary. Backend authentication, authorization, actor identity,
    and audit enforcement must be implemented and verified.
