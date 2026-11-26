@@ -16,14 +16,66 @@ class _DB:
     def __init__(self, engine):
         self.engine = engine
 
+# Add helper codes for root-cause classification
+CRITICAL_ROOT_CAUSE_FIELDS = (
+    "monthly_income_idr",
+    "num_active_lending_apps",
+    "total_loan_outstanding_idr",
+)
+
+ROOT_CAUSE_DEFAULTS = {
+    "age": 30,
+    "gender": "Female",
+    "province": "DKI Jakarta",
+    "education_level": "Bachelor (S1)",
+    "employment_status": "Formal Private Employee",
+    "primary_loan_purpose": "Daily Living & Emergency Buffer",
+    "regional_minimum_wage_umr_idr": 0.0,
+    "credit_limit_granted_idr": 0.0,
+    "loan_tenor_months": 6,
+    "daily_interest_rate_pct": 0.1,
+    "income_to_umr_ratio": 0.0,
+    "credit_limit_utilization_ratio": 0.0,
+    "monthly_installment_estimate_idr": 0.0,
+    "debt_service_ratio": 0.0,
+    "disposable_income_after_debt_idr": 0.0,
+}
+
+def fill_root_cause_defaults(features: dict) -> tuple[dict, list[str]]:
+    missing = [f for f in CRITICAL_ROOT_CAUSE_FIELDS if features.get(f) in (None, "")]
+    if missing:
+        raise ValueError(f"Missing critical fields for root-cause classification: {missing}")
+
+    merged = dict(features)
+    defaulted: list[str] = []
+    for k, v in ROOT_CAUSE_DEFAULTS.items():
+        if merged.get(k) in (None, ""):
+            merged[k] = v
+            defaulted.append(k)
+
+    return merged, defaulted
+
+
 @router.post("/root-cause/{borrower_id}", response_model=RootCauseResponse)
 def classify_root_cause(
     borrower_id: str,
     request: TWP90Request,
     background_tasks: BackgroundTasks,
 ):
+    # ─── Step 1: fill defaults before inference
     try:
-        result = predict_root_cause(request.features)
+        merged_features, defaulted_fields = fill_root_cause_defaults(request.features)
+    except ValueError as exc:
+        background_tasks.add_task(
+            notify_api_hit,
+            "POST /classify/root-cause/{borrower_id}",
+            borrower_id, "input_validation_failed", str(exc),
+        )
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # ─── Step 2: inference on merged features
+    try:
+        result = predict_root_cause(merged_features)
     except (RuntimeError, ValueError) as exc:
         background_tasks.add_task(
             notify_api_hit,
@@ -32,7 +84,7 @@ def classify_root_cause(
         )
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    # Evaluate rules
+    # ─── Step 3: rules (on raw request.features — rules check user-supplied DPD etc.)
     try:
         matches = evaluate_rules(borrower_id, request.features)
     except ValueError as exc:
@@ -43,13 +95,12 @@ def classify_root_cause(
         )
         matches = []
 
-    # Fire block for the TOP match only (Fix 2 from previous message)
+    # ─── Step 4: block if any rule matched
     block_outcome = None
     if matches:
         top = matches[0]
         reason = (
-            f"{top['reason']}; "
-            f"root_cause={result['root_cause']} "
+            f"{top['reason']}; root_cause={result['root_cause']} "
             f"(confidence={result['confidence']:.2f})"
         )
         try:
@@ -60,7 +111,6 @@ def classify_root_cause(
                 reason=reason,
                 idempotency_key=top["idempotency_key"],
             )
-            # ONLY notify on actual block trigger (not on success)
             background_tasks.add_task(
                 notify_api_hit,
                 "POST /classify/root-cause/{borrower_id}",
@@ -71,14 +121,13 @@ def classify_root_cause(
             background_tasks.add_task(
                 notify_api_hit,
                 "POST /classify/root-cause/{borrower_id}",
-                borrower_id, 
-                "block_failed", 
-                str(exc),
+                borrower_id, "block_failed", str(exc),
             )
 
-    # NO success notification
+    # ─── Step 5: return with defaulted_fields so frontend can warn
     return {
-        "borrower_id": borrower_id, 
-        **result, 
-        "block": block_outcome
+        "borrower_id": borrower_id,
+        **result,
+        "block": block_outcome,
+        "defaulted_fields": defaulted_fields,
     }
