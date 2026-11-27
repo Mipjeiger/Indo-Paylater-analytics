@@ -1201,6 +1201,56 @@ long enough to support the required rollback window.
 CI/CD status is a quality signal, not proof that external services, model
 artifacts, migrations, or production credentials are correctly configured.
 
+## 💻 Documentation of Engineering logs
+1. Postgres
+   - Database → paylater.database
+   ![alt text](<paylater_engineering/images/Screenshot 2026-11-25 at 21.02.53.png>)
+   - Prediction database → paylater.predictions
+   ![alt text](<paylater_engineering/images/Screenshot 2026-11-25 at 21.03.24.png>)
+   - Logs action DB → paylater.actions_log
+   ![alt text](<paylater_engineering/images/Screenshot 2026-11-25 at 21.03.51.png>)
+2. Redis
+   - Redis cache for fast caching base on timelapse
+   ![alt text](paylater_engineering/images/CAB7B64B-6C62-47DC-8161-0F9E208251F7.png)
+3. Feast
+   - Compute & Jobs
+   ![alt text](paylater_engineering/images/4A4C3C59-6A8C-4A15-8EBF-CA532E881445.png)
+   - Lineage feast graph
+   ![alt text](paylater_engineering/images/2944BD21-294F-4394-BE91-8C108BA107B2.png)
+4. Frontend (UI Website integration with backend)
+   - Home overview Credit Risk & Analysis → Business Workspace
+   ![alt text](paylater_engineering/images/1529955F-1571-4832-8E29-61544D5C5805.png)
+   - Task 1: TWP90 Default Risk
+   ![alt text](paylater_engineering/images/68D09D37-4F56-4DB4-A90A-7529D35650AF.png)
+   - Task 2: Gen Z DTI & Distress Forecasting
+   ![alt text](paylater_engineering/images/B838EEB8-EE87-4C79-B010-8DB58EF42D36.png)
+   - Task 3: Root-Cause Classification
+   ![alt text](paylater_engineering/images/E54CB436-7709-4ADD-985D-C2081E219719.png)
+5. Prefect
+   - Task 1: Flows on twp90
+   ![alt text](paylater_engineering/images/323D92E7-3BE5-4CDF-B05C-5F2F61B40A5D.png)
+   - Task 2: Flows on dti_distress
+   ![alt text](paylater_engineering/images/664C0BDE-F800-4C7F-B115-3A1EA093E9DF.png)
+   - Task 3: Flows on root_cause
+   ![alt text](paylater_engineering/images/1A9AFCAD-E4B3-49D8-81A8-728C6C529D84.png)
+6. Fastapi
+   - twp90 score prediction on database
+   ![alt text](paylater_engineering/images/48EDA6BB-9D59-4169-AFF7-844A42DCA159.png)
+   - API metrics backend
+   ![alt text](paylater_engineering/images/4BBF7F1C-8ECC-472B-80F5-8A90510B24A1.png)
+   - root-cause post prediction to use {borrower_id}
+   ![alt text](paylater_engineering/images/895B6DEF-ED5A-456E-A7F5-C63E8FBA17BB.png)
+7. MLFLow
+   - MLFlow logs for Paylater/twp90 models logs training runs
+   ![alt text](paylater_engineering/images/A32646C5-15FD-4AE7-A61E-933DD1F62051.png)
+   - MLFlow logs for Paylater/dti_distress models logs training runs
+   ![alt text](paylater_engineering/images/C7AD820A-1907-4F69-BECA-10F910402322.png)
+   - MLFlow logs for Paylater/root_cause models logs training runs
+   ![alt text](paylater_engineering/images/894B50BF-C8CF-4434-9575-9DC90C76209B.png)
+8. Slack
+   - 🔔 Slack notification is getting activated by success API calls
+   ![alt text](<paylater_engineering/images/Screenshot 2026-11-25 at 20.59.34.png>)
+
 ## ⚠️ Current limitations and production-readiness checklist
 
 The following items should be resolved before calling the platform production
