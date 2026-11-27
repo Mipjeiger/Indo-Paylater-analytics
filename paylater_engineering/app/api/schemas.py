@@ -10,6 +10,7 @@ class TWP90Response(BaseModel):
     borrower_id: str
     default_probability: float = Field(ge=0, le=1)
     model_version: str | None = None
+    defaulted_fields: list[str] = []
 
 class DTIResponse(BaseModel):
     borrower_id: str
@@ -23,3 +24,4 @@ class RootCauseResponse(BaseModel):
     model_version: str | None = None
     confidence: float
     block: list[dict] | None = None
+    defaulted_fields: list[str] = []

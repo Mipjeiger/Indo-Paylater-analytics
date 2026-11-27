@@ -18,8 +18,9 @@ import redis
 from feast import FeatureStore
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from app.api.config import settings
 
-MIRROR_KEY_PREFIX = "paylater_indodana:borrower:"
+MIRROR_KEY_PREFIX = settings.MIRROR_KEY_PREFIX
 MIRROR_TTL_SECONDS = 3600
 REFRESH_INTERVAL_SECONDS = 2400
 BORROWER_BATCH_SIZE = 500
@@ -63,7 +64,6 @@ def readable_fields(
         )
     return fields
 
-
 def load_borrower_ids(engine: Engine) -> list[str]:
     """Read the complete current borrower set from the PostgreSQL source table."""
     with engine.connect() as connection:
@@ -76,7 +76,6 @@ def load_borrower_ids(engine: Engine) -> list[str]:
         raise LookupError("paylater.database contains no borrowers to mirror")
     return borrower_ids
 
-
 def get_feature_refs(store: FeatureStore) -> list[str]:
     """Return all registered feature-view references for online retrieval."""
     feature_refs = [
@@ -87,7 +86,6 @@ def get_feature_refs(store: FeatureStore) -> list[str]:
     if not feature_refs:
         raise RuntimeError("No Feast feature views are registered.")
     return feature_refs
-
 
 def mirror_borrowers(
     store: FeatureStore,
@@ -130,7 +128,6 @@ def mirror_borrowers(
             pipeline.execute()
     return len(borrower_ids)
 
-
 def synchronize_once(
     store: FeatureStore,
     engine: Engine,
@@ -145,7 +142,6 @@ def synchronize_once(
         full_feature_names=True,
     )
     return mirror_borrowers(store, redis_client, borrower_ids, feature_refs)
-
 
 def wait_for_feast_server(host: str, port: int, timeout_seconds: int = 300) -> None:
     """Wait until Feast has applied its registry and started serving."""
@@ -163,7 +159,6 @@ def wait_for_feast_server(host: str, port: int, timeout_seconds: int = 300) -> N
                 ) from error
             time.sleep(2)
 
-
 def wait_for_feast_process(process: subprocess.Popen[bytes], seconds: int) -> None:
     """Wait in short intervals so an exited Feast server is detected promptly."""
     deadline = time.monotonic() + seconds
@@ -177,7 +172,6 @@ def wait_for_feast_process(process: subprocess.Popen[bytes], seconds: int) -> No
         if remaining <= 0:
             return
         time.sleep(min(5, remaining))
-
 
 def refresh_loop(
     store: FeatureStore,
@@ -213,12 +207,11 @@ def refresh_loop(
         else:
             wait_for_feast_process(feast_process, REFRESH_INTERVAL_SECONDS)
 
-
 def run_managed_service(once: bool) -> None:
     """Apply definitions, then supervise Feast serving and its refresh loop."""
-    feast_host = os.getenv("FEAST_SERVER_HOST", "127.0.0.1")
-    feast_port = int(os.getenv("FEAST_SERVER_PORT", "6566"))
-    bind_host = os.getenv("FEAST_SERVER_BIND_HOST", "0.0.0.0")
+    feast_host = settings.FEAST_SERVER_HOST
+    feast_port = settings.FEAST_SERVER_PORT
+    bind_host = settings.FEAST_SERVER_BIND_HOST
     feast_process: subprocess.Popen[bytes] | None = None
     previous_sigterm = signal.signal(signal.SIGTERM, _shutdown_signal)
     previous_sigint = signal.signal(signal.SIGINT, _shutdown_signal)
@@ -270,10 +263,8 @@ def run_managed_service(once: bool) -> None:
         signal.signal(signal.SIGTERM, previous_sigterm)
         signal.signal(signal.SIGINT, previous_sigint)
 
-
 def _shutdown_signal(signum: int, frame: Any) -> None:
     raise KeyboardInterrupt(f"Received signal {signum}")
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -306,8 +297,8 @@ def main() -> None:
             "REDIS_URL must be set for the readable Redis projection."
         )
 
-    feast_host = os.getenv("FEAST_SERVER_HOST", "feast")
-    feast_port = int(os.getenv("FEAST_SERVER_PORT", "6566"))
+    feast_host = settings.FEAST_SERVER_HOST_TCP
+    feast_port = settings.FEAST_SERVER_PORT
     wait_for_feast_server(feast_host, feast_port)
 
     store = FeatureStore(repo_path=os.path.dirname(__file__))

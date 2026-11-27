@@ -39,6 +39,8 @@ ROOT_CAUSE_DEFAULTS = {
     "monthly_installment_estimate_idr": 0.0,
     "debt_service_ratio": 0.0,
     "disposable_income_after_debt_idr": 0.0,
+    "debt_to_income_ratio": 0.0,
+    "financial_distress_index": 0.0,
 }
 
 def fill_root_cause_defaults(features: dict) -> tuple[dict, list[str]]:
@@ -48,6 +50,14 @@ def fill_root_cause_defaults(features: dict) -> tuple[dict, list[str]]:
 
     merged = dict(features)
     defaulted: list[str] = []
+
+    # Ensure the debt income ratio column is filled
+    if merged.get("debt_to_income_ratio") in (None, ""):
+        income = merged.get("monthly_income_idr")
+        outstanding = merged.get("total_loan_outstanding_idr")
+        if isinstance(income, (int, float)) and isinstance(outstanding, (int, float)) and income > 0:
+            merged["debt_to_income_ratio"] = round(float(outstanding) / float(income), 4)
+
     for k, v in ROOT_CAUSE_DEFAULTS.items():
         if merged.get(k) in (None, ""):
             merged[k] = v
