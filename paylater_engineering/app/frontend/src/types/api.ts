@@ -27,6 +27,8 @@ export type RootCauseResponse = {
   borrower_id: string;
   root_cause: string;
   model_version?: string | null;
+  confidence?: number;
+  defaulted_fields?: string[];
 };
 
 export type DashboardKpis = {
@@ -99,10 +101,18 @@ export type BorrowerPortfolioRecord = {
   education_level: string | null;
   employment_status: string | null;
   monthly_income_idr: number | null;
+  regional_minimum_wage_umr_idr?: number | null;
+  num_active_lending_apps?: number | null;
   total_loan_outstanding_idr: number | null;
   credit_limit_granted_idr: number | null;
+  loan_tenor_months?: number | null;
+  daily_interest_rate_pct?: number | null;
   credit_limit_utilization_ratio: number | null;
   debt_to_income_ratio: number | null;
+  income_to_umr_ratio?: number | null;
+  monthly_installment_estimate_idr?: number | null;
+  debt_service_ratio?: number | null;
+  disposable_income_after_debt_idr?: number | null;
   days_past_due: number | null;
   financial_distress_index: number | null;
   risk_score: number | null;

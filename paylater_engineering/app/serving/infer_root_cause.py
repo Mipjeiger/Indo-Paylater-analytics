@@ -31,6 +31,8 @@ REQUIRED_FEATURES_FALLBACK = (
     "monthly_installment_estimate_idr",
     "debt_service_ratio",
     "disposable_income_after_debt_idr",
+    "debt_to_income_ratio",
+    "financial_distress_index",
 )
 CATEGORICAL_FEATURES = (
     "gender",

@@ -6,6 +6,7 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     port: 8085,
+    strictPort: true, // fail if the port is already in use
     proxy: {
       "/health": {
         target: "http://fastapi:8000",
