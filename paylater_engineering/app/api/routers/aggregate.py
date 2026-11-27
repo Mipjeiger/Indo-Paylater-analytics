@@ -157,27 +157,7 @@ def portfolio_by_borrower(borrower_id: str, database=Depends(get_db)):
             row = connection.execute(
                 text(
                     """
-                    SELECT
-                        borrower_id,
-                        age,
-                        gender,
-                        province,
-                        education_level,
-                        employment_status,
-                        monthly_income_idr,
-                        total_loan_outstanding_idr,
-                        credit_limit_granted_idr,
-                        credit_limit_utilization_ratio,
-                        debt_to_income_ratio,
-                        days_past_due,
-                        financial_distress_index,
-                        risk_score,
-                        risk_short,
-                        is_high_risk,
-                        twp90_default_status,
-                        primary_default_root_cause,
-                        primary_loan_purpose,
-                        updated_at
+                    SELECT *
                     FROM paylater.database
                     WHERE borrower_id = :borrower_id
                     """
